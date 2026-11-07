@@ -5,6 +5,7 @@ import { HUD } from './ui/HUD';
 import { Smartphone } from './ui/Smartphone';
 import { LoadingScreen } from './ui/LoadingScreen';
 import { PauseMenu } from './ui/PauseMenu';
+import { Supermarket } from './ui/Supermarket';
 import * as THREE from 'three';
 
 export default function App() {
@@ -129,6 +130,8 @@ export default function App() {
           onSpawnCar={handleSpawnCar}
         />
       )}
+
+      {screen === 'playing' && <Supermarket />}
 
       {screen === 'playing' && pendingStoryChoice && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">

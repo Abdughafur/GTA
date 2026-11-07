@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useGameStore } from '../core/gameState';
-import { Play, RotateCcw, Sliders, Info, Volume2, ShieldCheck, Gamepad2 } from 'lucide-react';
+import { ArrowRight, Gamepad2, Info, Play, Sliders } from 'lucide-react';
 import { audioManager } from '../core/AudioManager';
 
 interface LoadingScreenProps {
@@ -42,103 +42,92 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ onStartGame }) => 
   const isLoaded = loadingProgress >= 100;
 
   return (
-    <div className="fixed inset-0 z-40 flex flex-col justify-between p-6 sm:p-12 select-none overflow-hidden bg-gradient-to-t from-slate-950 via-slate-950/60 to-transparent">
-      {/* Top Header / Branding */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 bg-red-500 rounded-full animate-ping" />
-          <span className="text-xs font-bold uppercase tracking-widest text-slate-300 font-game">
-            VICE BAY OPEN WORLD ENGINE
-          </span>
-        </div>
-
-        <div className="text-[11px] font-mono text-slate-400 bg-slate-900/80 px-3 py-1 rounded-full border border-slate-800">
-          THREE.JS PBR · RAPIER DYNAMICS · PROCEDURAL AUDIO
-        </div>
-      </div>
-
-      {/* Center: Bespoke Stylized GTA Title Lockup */}
-      <div className="my-auto max-w-2xl space-y-4">
-        <div className="space-y-1">
-          <div className="inline-block px-3 py-1 bg-red-600 text-white font-game font-extrabold text-xs tracking-widest uppercase rounded">
-            Next-Gen Browser Edition
+    <div className="fixed inset-0 z-40 flex select-none flex-col overflow-y-auto bg-[linear-gradient(90deg,rgba(4,7,11,0.94)_0%,rgba(4,7,11,0.78)_36%,rgba(4,7,11,0.18)_76%,rgba(4,7,11,0.08)_100%),linear-gradient(0deg,rgba(4,7,11,0.82)_0%,transparent_32%)] px-6 py-7 sm:px-12 sm:py-10 lg:px-20 lg:py-12">
+      <header className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <span className="h-7 w-px bg-rose-500" />
+          <div>
+            <div className="font-game text-[11px] font-bold uppercase tracking-[0.3em] text-white">BlockGTA</div>
+            <div className="mt-0.5 text-[9px] uppercase tracking-[0.24em] text-white/50">Vice Bay</div>
           </div>
-          <h1 className="text-5xl sm:text-7xl font-black font-game tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-white via-slate-100 to-slate-400 drop-shadow-2xl uppercase">
+        </div>
+      </header>
+
+      <main className="flex min-h-0 flex-1 items-center py-6 sm:py-4">
+        <div className="w-full max-w-xl">
+          <div className="mb-4 flex items-center gap-3 text-[10px] font-semibold uppercase tracking-[0.28em] text-white/60">
+            <span className="h-px w-8 bg-rose-500" />
+            Welcome to Vice Bay
+          </div>
+          <h1 className="font-game text-6xl font-black uppercase leading-[0.9] tracking-[-0.07em] text-white drop-shadow-2xl sm:text-8xl lg:text-9xl">
             BlockGTA
           </h1>
-          <div className="text-xl sm:text-2xl font-bold font-game tracking-widest text-red-500 uppercase flex items-center gap-3">
-            <span>VICE CITY 3D</span>
-            <span className="w-12 h-0.5 bg-red-500 inline-block" />
-            <span className="text-slate-400 text-sm font-mono normal-case tracking-normal">v1.4.0 High-Fidelity</span>
+          <div className="mt-5 text-xs font-medium uppercase tracking-[0.3em] text-rose-300 sm:text-sm">
+            The city is yours
           </div>
-        </div>
 
-        <p className="text-sm text-slate-300 max-w-lg leading-relaxed">
-          Explore a bustling 3D coastal metropolis featuring responsive vehicle physics, interactive city traffic,
-          pedestrian crowds, wanted police pursuits, live smartphone GPS, and high-stakes syndicate contracts.
-        </p>
+          <p className="mt-6 max-w-md text-sm leading-7 text-slate-200/75 sm:text-base">
+            A coastal city with its own rhythm. Find your way through the streets, take the wheel, and make a name for yourself.
+          </p>
 
-        {/* Start / Menu Actions */}
-        {isLoaded ? (
-          <div className="pt-4 space-y-3">
-            <div className="flex flex-wrap items-center gap-3">
+          {isLoaded ? (
+            <div className="mt-9 flex max-w-md flex-col items-start gap-5">
               <button
                 onClick={handleStart}
-                className="px-8 py-3.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white rounded-xl font-game font-black text-lg tracking-wider uppercase shadow-2xl shadow-red-600/40 transition active:scale-95 flex items-center gap-2 cursor-pointer"
+                className="group flex min-h-14 w-full items-center justify-between border border-white bg-white px-5 py-4 text-left font-game text-sm font-bold uppercase tracking-[0.16em] text-slate-950 transition hover:border-rose-300 hover:bg-rose-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white sm:w-80"
               >
-                <Play className="w-5 h-5 fill-white" />
-                <span>Enter Vice Bay</span>
+                <span className="flex items-center gap-3">
+                  <Play className="h-4 w-4 fill-current" />
+                  Enter Vice Bay
+                </span>
+                <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
               </button>
 
-              <button
-                onClick={() => setActiveModal('settings')}
-                className="px-5 py-3.5 bg-slate-900/90 hover:bg-slate-800 border border-slate-700 text-slate-200 rounded-xl font-game font-bold text-sm tracking-wider uppercase transition active:scale-95 flex items-center gap-2 cursor-pointer"
-              >
-                <Sliders className="w-4 h-4 text-slate-400" />
-                <span>Settings</span>
-              </button>
+              <nav className="flex flex-wrap items-center gap-x-6 gap-y-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-white/70">
+                <button
+                  onClick={() => setActiveModal('settings')}
+                  className="flex items-center gap-2 transition hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
+                >
+                  <Sliders className="h-3.5 w-3.5" />
+                  Settings
+                </button>
+                <span className="h-3 w-px bg-white/25" />
+                <button
+                  onClick={() => setActiveModal('credits')}
+                  className="flex items-center gap-2 transition hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
+                >
+                  <Info className="h-3.5 w-3.5" />
+                  Controls & Info
+                </button>
+              </nav>
 
-              <button
-                onClick={() => setActiveModal('credits')}
-                className="px-5 py-3.5 bg-slate-900/90 hover:bg-slate-800 border border-slate-700 text-slate-200 rounded-xl font-game font-bold text-sm tracking-wider uppercase transition active:scale-95 flex items-center gap-2 cursor-pointer"
-              >
-                <Info className="w-4 h-4 text-slate-400" />
-                <span>Controls & Info</span>
-              </button>
+              <div className="flex max-w-lg items-start gap-2 text-[10px] leading-5 text-white/45 sm:text-[11px]">
+                <Gamepad2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>WASD Move / Drive&nbsp; · &nbsp;Space Jump / Drift&nbsp; · &nbsp;E Enter Vehicle&nbsp; · &nbsp;Esc Pause</span>
+              </div>
             </div>
+          ) : (
+            <div className="mt-9 max-w-md space-y-3">
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-white/75">{loadingMessage}</span>
+                <span className="font-mono tabular-nums text-rose-300">{loadingProgress}%</span>
+              </div>
+              <div className="h-px overflow-hidden bg-white/20">
+                <div
+                  className="h-full bg-rose-400 transition-all duration-300"
+                  style={{ width: `${loadingProgress}%` }}
+                />
+              </div>
+              <p className="text-[11px] leading-5 text-white/50">{gameTips[tipIndex]}</p>
+            </div>
+          )}
+        </div>
+      </main>
 
-            <div className="text-xs text-slate-400 font-mono flex items-center gap-2">
-              <Gamepad2 className="w-4 h-4 text-slate-500" />
-              <span>WASD Move/Drive · Space Jump/Drift · E Enter Car · P Smartphone · Esc Pause</span>
-            </div>
-          </div>
-        ) : (
-          /* Loading Bar & Rotating Status */
-          <div className="pt-4 space-y-3 max-w-md">
-            <div className="flex items-center justify-between text-xs font-mono">
-              <span className="text-slate-300 font-medium">{loadingMessage}</span>
-              <span className="text-amber-400 font-bold">{loadingProgress}%</span>
-            </div>
-
-            <div className="h-2.5 bg-slate-900 rounded-full overflow-hidden border border-slate-800 p-0.5">
-              <div
-                className="h-full bg-gradient-to-r from-amber-500 via-red-500 to-rose-500 rounded-full transition-all duration-300"
-                style={{ width: `${loadingProgress}%` }}
-              />
-            </div>
-
-            <div className="text-[11px] text-slate-400 italic">
-              " {gameTips[tipIndex]} "
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Bottom Footer */}
-      <div className="flex items-center justify-between text-xs text-slate-500 border-t border-slate-900 pt-3">
-        <span>© 2026 BlockGTA · Built with Three.js & TypeScript</span>
-        <span>Press [P] in-game for Smartphone</span>
-      </div>
+      <footer className="flex items-end justify-between border-t border-white/15 pt-4 text-[9px] uppercase tracking-[0.18em] text-white/40">
+        <span>Vice Bay</span>
+        <span className="text-right">Press P in-game to open your phone</span>
+      </footer>
 
       {/* Settings Modal */}
       {activeModal === 'settings' && (

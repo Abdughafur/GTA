@@ -1,8 +1,10 @@
 import * as THREE from 'three';
 import { furnitureFactory } from './FurnitureFactory';
 import { CollisionBox } from './CityGenerator';
-import { useGameStore, InteriorType } from '../core/gameState';
+import { useGameStore, SUPERMARKET_PRODUCTS } from '../core/gameState';
 import { audioManager } from '../core/AudioManager';
+import { modelFactory } from './ModelFactory';
+import { textureFactory } from './TextureGenerator';
 
 export interface StaircaseRamp {
   minX: number;
@@ -20,7 +22,7 @@ export interface InteractiveProp {
   position: THREE.Vector3;
   radius: number;
   prompt: string;
-  action: () => void;
+  action: (playerPos: THREE.Vector3) => void;
 }
 
 export class BuildingInteriorsManager {
@@ -59,7 +61,224 @@ export class BuildingInteriorsManager {
 
     // 3. Build Vice Bay General Hospital (Floors 1, 2)
     this.buildHospitalInterior();
+
+    // 4. Build the streamed-in supermarket interior and its shopping interactions.
+    this.buildSupermarketInterior();
   }
+
+  private buildSupermarketInterior() {
+    const origin = new THREE.Vector3(2000, 300, -2000);
+    const store = new THREE.Group();
+    store.position.copy(origin);
+    store.visible = false;
+    this.marketGroup = store;
+
+    const tile = new THREE.MeshStandardMaterial({ color: 0xd8ded8, roughness: 0.28 });
+    const wall = new THREE.MeshStandardMaterial({ color: 0xe9e6d9, roughness: 0.7 });
+    const trim = new THREE.MeshStandardMaterial({ color: 0x126b52, roughness: 0.45 });
+    const metal = new THREE.MeshStandardMaterial({ color: 0x536269, metalness: 0.65, roughness: 0.38 });
+    const glass = new THREE.MeshPhysicalMaterial({
+      color: 0x9de5ec,
+      roughness: 0.12,
+      metalness: 0.12,
+      transparent: true,
+      opacity: 0.55
+    });
+
+    const floor = new THREE.Mesh(new THREE.BoxGeometry(40, 0.2, 36), tile);
+    floor.position.y = -0.1;
+    floor.receiveShadow = true;
+    store.add(floor);
+    const ceiling = new THREE.Mesh(new THREE.BoxGeometry(40, 0.3, 36), wall);
+    ceiling.position.y = 8;
+    store.add(ceiling);
+
+    const wallParts = [
+      { size: [0.3, 8, 36] as const, pos: [-20, 4, 0] as const },
+      { size: [0.3, 8, 36] as const, pos: [20, 4, 0] as const },
+      { size: [40, 8, 0.3] as const, pos: [0, 4, -18] as const },
+      { size: [16, 8, 0.3] as const, pos: [-12, 4, 18] as const },
+      { size: [16, 8, 0.3] as const, pos: [12, 4, 18] as const }
+    ];
+    for (const part of wallParts) {
+      const mesh = new THREE.Mesh(
+        new THREE.BoxGeometry(part.size[0], part.size[1], part.size[2]),
+        wall
+      );
+      mesh.position.set(part.pos[0], part.pos[1], part.pos[2]);
+      mesh.receiveShadow = true;
+      store.add(mesh);
+    }
+
+    for (const x of [-10, 0, 10]) {
+      const strip = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.12, 24), trim);
+      strip.position.set(x, 7.75, -1);
+      store.add(strip);
+      const light = new THREE.PointLight(0xffedc4, 18, 24, 1.7);
+      light.position.set(x, 7, 0);
+      store.add(light);
+    }
+    const entranceGlass = new THREE.Mesh(new THREE.BoxGeometry(7.5, 3.2, 0.12), glass);
+    entranceGlass.position.set(0, 1.65, 17.8);
+    store.add(entranceGlass);
+
+    const productRows: Array<{ x: number; z: number; product: 'apple' | 'bread' | 'milk' | 'water' | 'soda' | 'sandwich'; color: number }> = [
+      { x: -12, z: -5, product: 'apple', color: 0xd73d32 },
+      { x: -5, z: -5, product: 'bread', color: 0xc0843d },
+      { x: 2, z: -5, product: 'milk', color: 0xf1f5f9 },
+      { x: 9, z: -5, product: 'water', color: 0x38bdf8 },
+      { x: -12, z: 3, product: 'soda', color: 0x7f1d1d },
+      { x: -5, z: 3, product: 'sandwich', color: 0x84a34d }
+    ];
+    for (const row of productRows) {
+      const itemMaterial = new THREE.MeshStandardMaterial({
+        color: row.color,
+        roughness: 0.42,
+        metalness: row.product === 'milk' || row.product === 'water' ? 0.12 : 0
+      });
+      const rack = new THREE.Group();
+      const base = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.2, 2.4), metal);
+      base.position.y = 0.12;
+      rack.add(base);
+      for (const shelfY of [0.8, 1.65, 2.5]) {
+        const shelf = new THREE.Mesh(new THREE.BoxGeometry(4, 0.12, 2.2), metal);
+        shelf.position.y = shelfY;
+        rack.add(shelf);
+        for (let item = 0; item < 5; item++) {
+          const product = new THREE.Mesh(
+            item % 2 === 0 ? new THREE.BoxGeometry(0.45, 0.55, 0.45) : new THREE.CylinderGeometry(0.19, 0.22, 0.62, 8),
+            itemMaterial
+          );
+          product.position.set(-1.5 + item * 0.75, shelfY + 0.35, item % 2 === 0 ? -0.2 : 0.25);
+          rack.add(product);
+        }
+      }
+      rack.position.set(row.x, 0, row.z);
+      store.add(rack);
+
+      const productInfo = SUPERMARKET_PRODUCTS.find((product) => product.id === row.product);
+      const productName = productInfo?.name ?? row.product;
+      const label = new THREE.Mesh(
+        new THREE.BoxGeometry(3.2, 0.45, 0.12),
+        new THREE.MeshStandardMaterial({
+          map: textureFactory.getStorefrontTexture(productName.toUpperCase(), '#f8fafc', '#334155'),
+          roughness: 0.8
+        })
+      );
+      label.position.set(row.x, 3.15, row.z + 1.3);
+      store.add(label);
+      this.interactiveProps.push({
+        id: `market_shelf_${row.product}`,
+        name: `${productName} aisle`,
+        position: new THREE.Vector3(origin.x + row.x, origin.y, origin.z + row.z + 2.2),
+        radius: 2.8,
+        prompt: `Press [F] - Add ${productName} ($${productInfo?.price ?? 0}) to shopping basket`,
+        action: () => useGameStore.getState().addSupermarketProduct(row.product)
+      });
+    }
+
+    const basket = new THREE.Group();
+    const basketBody = new THREE.Mesh(
+      new THREE.BoxGeometry(1.5, 0.8, 1.1),
+      new THREE.MeshStandardMaterial({ color: 0xe34335, metalness: 0.18, roughness: 0.46, wireframe: true })
+    );
+    basketBody.position.y = 0.55;
+    const basketHandle = new THREE.Mesh(new THREE.TorusGeometry(0.48, 0.06, 8, 16, Math.PI), metal);
+    basketHandle.rotation.z = Math.PI;
+    basketHandle.position.y = 1.05;
+    basket.add(basketBody, basketHandle);
+    basket.position.set(-14, 0, 12);
+    store.add(basket);
+
+    this.interactiveProps.push({
+      id: 'market_basket',
+      name: 'Shopping Basket',
+      position: new THREE.Vector3(origin.x - 14, origin.y, origin.z + 12),
+      radius: 2.5,
+      prompt: 'Press [F] - Take a shopping basket',
+      action: () => useGameStore.getState().takeShoppingBasket()
+    });
+
+    const checkoutCounter = new THREE.Mesh(new THREE.BoxGeometry(5.5, 1.1, 2.1), trim);
+    checkoutCounter.position.set(11, 0.55, 10);
+    store.add(checkoutCounter);
+    const register = new THREE.Group();
+    const registerBase = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.35, 0.8), metal);
+    registerBase.position.y = 1.3;
+    const registerScreen = new THREE.Mesh(
+      new THREE.BoxGeometry(0.8, 0.55, 0.1),
+      new THREE.MeshStandardMaterial({ color: 0x14242b, emissive: 0x1d6260, emissiveIntensity: 0.8 })
+    );
+    registerScreen.position.set(0, 1.7, -0.25);
+    register.add(registerBase, registerScreen);
+    register.position.set(11, 0, 10);
+    store.add(register);
+
+    const cashier = modelFactory.createCharacter(0x176b55, 0xf1c6a5, { bodyShape: 'feminine', hairColor: 0x382a22 });
+    cashier.group.position.set(11, 0, 12.2);
+    cashier.group.rotation.y = Math.PI;
+    store.add(cashier.group);
+    this.marketCashier = cashier;
+
+    for (const [index, color] of [0x9b59b6, 0x2563eb, 0xd97706].entries()) {
+      const shopper = modelFactory.createCharacter(color, [0xf0c7a2, 0xb77b5c, 0x7b513c][index], {
+        bodyShape: index === 1 ? 'feminine' : 'masculine',
+        hat: index === 2
+      });
+      shopper.group.position.set(-10 + index * 6, 0, 6 + (index % 2) * 2);
+      shopper.group.rotation.y = index * 0.8;
+      store.add(shopper.group);
+      this.marketShoppers.push({ rig: shopper, origin: shopper.group.position.clone(), phase: index * 1.8 });
+    }
+
+    this.rootGroup.add(store);
+    this.colliders.push(
+      { minX: origin.x - 20, maxX: origin.x - 19.7, minZ: origin.z - 18, maxZ: origin.z + 18, type: 'interiorWall' },
+      { minX: origin.x + 19.7, maxX: origin.x + 20, minZ: origin.z - 18, maxZ: origin.z + 18, type: 'interiorWall' },
+      { minX: origin.x - 20, maxX: origin.x + 20, minZ: origin.z - 18.3, maxZ: origin.z - 18, type: 'interiorWall' },
+      { minX: origin.x - 20, maxX: origin.x - 3.75, minZ: origin.z + 17.8, maxZ: origin.z + 18.2, type: 'interiorWall' },
+      { minX: origin.x + 3.75, maxX: origin.x + 20, minZ: origin.z + 17.8, maxZ: origin.z + 18.2, type: 'interiorWall' }
+    );
+
+    this.interactiveProps.push({
+      id: 'market_exit',
+      name: 'Supermarket Exit',
+      position: new THREE.Vector3(origin.x, origin.y, origin.z + 14),
+      radius: 3.2,
+      prompt: 'Press [F] - Exit Vice Bay Fresh Market',
+      action: (playerPos) => {
+        useGameStore.getState().setCurrentInterior('outdoor');
+        useGameStore.getState().closeSupermarket();
+        playerPos.set(180, 0, -300);
+        audioManager.playDoorSlam();
+      }
+    });
+    this.interactiveProps.push({
+      id: 'market_checkout',
+      name: 'Supermarket Checkout',
+      position: new THREE.Vector3(origin.x + 11, origin.y, origin.z + 8.5),
+      radius: 3,
+      prompt: 'Press [F] - Pay for groceries with cash or bank card',
+      action: () => useGameStore.getState().openSupermarket()
+    });
+    this.interactiveProps.push({
+      id: 'market_entry',
+      name: 'Vice Bay Fresh Market Entrance',
+      position: new THREE.Vector3(180, 0, -300),
+      radius: 3.5,
+      prompt: 'Press [F] - Enter Vice Bay Fresh Market',
+      action: (playerPos) => {
+        useGameStore.getState().setCurrentInterior('supermarket');
+        useGameStore.getState().closeSupermarket();
+        playerPos.set(origin.x, origin.y, origin.z + 14);
+        audioManager.playDoorSlam();
+      }
+    });
+  }
+
+  private marketCashier: ReturnType<typeof modelFactory.createCharacter> | null = null;
+  private marketShoppers: { rig: ReturnType<typeof modelFactory.createCharacter>; origin: THREE.Vector3; phase: number }[] = [];
+  private marketGroup: THREE.Group | null = null;
 
   // --- 1. APARTMENT BUILDING (LOBBY + PENTHOUSE + ROOFTOP HELIPAD) ---
   private buildApartmentBuilding() {
@@ -478,6 +697,20 @@ export class BuildingInteriorsManager {
 
   public update(playerPos: THREE.Vector3, dt: number): number {
     const store = useGameStore.getState();
+    const inMarketInterior =
+      playerPos.x >= 1980 && playerPos.x <= 2020 &&
+      playerPos.z >= -2020 && playerPos.z <= -1980;
+    if (this.marketGroup) this.marketGroup.visible = inMarketInterior;
+    if (inMarketInterior) {
+      for (const shopper of this.marketShoppers) {
+        shopper.phase += dt * 0.7;
+        const walking = Math.sin(shopper.phase);
+        shopper.rig.group.position.x = shopper.origin.x + walking * 1.1;
+        shopper.rig.group.position.z = shopper.origin.z + Math.cos(shopper.phase * 0.7) * 0.65;
+        shopper.rig.animate(Math.abs(walking) * 0.25, false, false, dt);
+      }
+      this.marketCashier?.animate(0, false, false, dt);
+    }
 
     // 1. Elevator Vertical Physics Update
     if (this.isElevatorMoving) {
@@ -523,7 +756,7 @@ export class BuildingInteriorsManager {
     this.elevatorDoorR.position.x = 0.38 + this.doorOpenProgress * 0.65;
 
     // 3. Platform Elevation & Staircase Detection
-    let calculatedGroundY = 0;
+    let calculatedGroundY = inMarketInterior ? 300 : 0;
 
     // A. Check if Player is standing inside the moving Elevator Car
     const inElevatorX = playerPos.x >= -17.5 && playerPos.x <= -14.5;
@@ -559,19 +792,16 @@ export class BuildingInteriorsManager {
     // 4. Check Nearest Interactive Prop Prompt
     let activePrompt: string | null = null;
     let closestDist = 999;
-    let activeAction: (() => void) | null = null;
-
     for (const prop of this.interactiveProps) {
       const d = Math.hypot(playerPos.x - prop.position.x, playerPos.z - prop.position.z);
       const dy = Math.abs(playerPos.y - prop.position.y);
       if (d < prop.radius && dy < 2.5 && d < closestDist) {
         closestDist = d;
         activePrompt = prop.prompt;
-        activeAction = prop.action;
       }
     }
 
-    if (activePrompt) {
+    if (store.interactionPrompt !== activePrompt) {
       store.setInteractionPrompt(activePrompt);
     }
 
@@ -583,7 +813,7 @@ export class BuildingInteriorsManager {
       const d = Math.hypot(playerPos.x - prop.position.x, playerPos.z - prop.position.z);
       const dy = Math.abs(playerPos.y - prop.position.y);
       if (d < prop.radius && dy < 2.5) {
-        prop.action();
+        prop.action(playerPos);
         return;
       }
     }

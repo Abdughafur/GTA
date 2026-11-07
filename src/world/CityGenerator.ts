@@ -27,6 +27,16 @@ export interface TrafficSignalData {
 }
 
 export function getDistrictName(x: number, z: number): string {
+  if (x > 700 && z < -400) return 'Vice Bay Air Force Base';
+  if (Math.abs(x) > 700 && z < -700) return x < -1050 ? 'Vice Bay Stadium District' : 'Vice Bay University';
+  if (z < -900 && Math.abs(x) <= 700) return 'Kingsgate Castle & Old Fort';
+  if (z > 700 && Math.abs(x) < 700) return 'Liberty Grand Park';
+  if (x < -700 && z > 700) return 'Southside Ghetto';
+  if (x < -700) return 'Old Quarter Market';
+  if (x > 700 && z > 400) return 'Carter Hills & Elite Villas';
+  if (x > 700) return 'East Ridge Villas';
+  if (z < -700) return 'North Bay Mountain Pass';
+  if (z > 700) return 'Liberty Grand Park';
   if (x > 240 && z < -120) return 'Vice Bay International Airport';
   if (x > 240 && z > 55) return 'Carter County Farms';
   if (z > 245) return 'Sunset Beach & Pier 9';
@@ -72,9 +82,9 @@ export class CityGenerator {
     const trafficSignals: TrafficSignalData[] = [];
 
     // City Ground Plane (Asphalt / Sidewalk / Grass)
-    const groundGeo = new THREE.PlaneGeometry(1300, 1300, 64, 64);
+    const groundGeo = new THREE.PlaneGeometry(3000, 3000, 64, 64);
     const grassTexture = textureFactory.getGrassTexture();
-    grassTexture.repeat.set(30, 30);
+    grassTexture.repeat.set(70, 70);
     const groundMat = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       map: grassTexture,
@@ -434,17 +444,19 @@ export class CityGenerator {
     });
 
     this.addOuterDistricts(cityGroup, colliders);
+    this.addSupermarketExterior(cityGroup, colliders);
     this.addAirport(cityGroup);
     this.addBeachfront(cityGroup);
     this.addFarm(cityGroup, colliders);
     this.addDistantHills(cityGroup, colliders);
     this.addLandmarkSigns(cityGroup);
 
-    // Outlying boundaries / city fence to prevent falling off map
+    // Outlying boundaries / city fence to prevent falling off the expanded map.
     colliders.push(
-      { minX: -420, maxX: -410, minZ: -410, maxZ: 410, type: 'building' },
-      { minX: 410, maxX: 420, minZ: -410, maxZ: 410, type: 'building' },
-      { minX: -410, maxX: 410, minZ: -420, maxZ: -410, type: 'building' }
+      { minX: -1510, maxX: -1490, minZ: -1510, maxZ: 1510, type: 'building' },
+      { minX: 1490, maxX: 1510, minZ: -1510, maxZ: 1510, type: 'building' },
+      { minX: -1510, maxX: 1510, minZ: -1510, maxZ: -1490, type: 'building' },
+      { minX: -1510, maxX: 1510, minZ: 1490, maxZ: 1510, type: 'building' }
     );
 
     return {
@@ -534,6 +546,64 @@ export class CityGenerator {
       sign.rotation.y = landmark.x < -150 ? Math.PI / 2 : 0;
       cityGroup.add(sign);
     }
+  }
+
+  private addSupermarketExterior(cityGroup: THREE.Group, colliders: CollisionBox[]) {
+    const shop = new THREE.Group();
+    shop.position.set(180, 0, -320);
+
+    const facade = new THREE.MeshStandardMaterial({ color: 0xe7e4d8, roughness: 0.76 });
+    const trim = new THREE.MeshStandardMaterial({ color: 0x126b52, roughness: 0.5 });
+    const glass = new THREE.MeshPhysicalMaterial({
+      color: 0x9de5ec,
+      roughness: 0.12,
+      metalness: 0.12,
+      transparent: true,
+      opacity: 0.65
+    });
+
+    const body = new THREE.Mesh(new THREE.BoxGeometry(28, 12, 28), facade);
+    body.position.y = 6;
+    body.castShadow = true;
+    body.receiveShadow = true;
+    shop.add(body);
+
+    const awning = new THREE.Mesh(new THREE.BoxGeometry(30, 1.2, 5), trim);
+    awning.position.set(0, 9.5, 14);
+    shop.add(awning);
+
+    const sign = new THREE.Mesh(
+      new THREE.BoxGeometry(20, 3.2, 0.5),
+      new THREE.MeshStandardMaterial({
+        map: textureFactory.getStorefrontTexture('VICE BAY FRESH MARKET', '#126b52', '#fff8dc'),
+        emissive: 0x0b382b,
+        emissiveIntensity: 0.65
+      })
+    );
+    sign.position.set(0, 11.2, 14.2);
+    shop.add(sign);
+
+    const displayWindow = new THREE.Mesh(new THREE.BoxGeometry(8, 4.5, 0.18), glass);
+    displayWindow.position.set(-8, 4.3, 14.08);
+    const rightWindow = displayWindow.clone();
+    rightWindow.position.x = 8;
+    shop.add(displayWindow, rightWindow);
+
+    const doorFrame = new THREE.Mesh(new THREE.BoxGeometry(4, 5.2, 0.3), trim);
+    doorFrame.position.set(0, 2.6, 14);
+    const doorGlass = new THREE.Mesh(new THREE.BoxGeometry(3.2, 4.6, 0.18), glass);
+    doorGlass.position.set(0, 2.5, 14.1);
+    shop.add(doorFrame, doorGlass);
+    cityGroup.add(shop);
+
+    colliders.push({
+      minX: 165.5,
+      maxX: 194.5,
+      minZ: -334.5,
+      maxZ: -305.5,
+      name: 'Vice Bay Fresh Market',
+      type: 'building'
+    });
   }
 
   private addOuterDistricts(cityGroup: THREE.Group, colliders: CollisionBox[]) {

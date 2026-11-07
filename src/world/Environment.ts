@@ -9,6 +9,12 @@ export class EnvironmentSystem {
   private rainGeo: THREE.BufferGeometry | null = null;
   private scene: THREE.Scene;
   private skyMaterial: THREE.ShaderMaterial;
+  private sky: THREE.Mesh;
+  private stars: THREE.Points;
+  private moon: THREE.Mesh;
+  private lightning: THREE.DirectionalLight;
+  private lightningTimer = 8;
+  private lightningFlash = 0;
 
   constructor(scene: THREE.Scene, renderer: THREE.WebGLRenderer) {
     this.scene = scene;
@@ -43,9 +49,36 @@ export class EnvironmentSystem {
       depthWrite: false,
       fog: false
     });
-    const sky = new THREE.Mesh(new THREE.SphereGeometry(800, 32, 20), this.skyMaterial);
-    sky.renderOrder = -1000;
-    scene.add(sky);
+    this.sky = new THREE.Mesh(new THREE.SphereGeometry(3000, 32, 20), this.skyMaterial);
+    this.sky.renderOrder = -1000;
+    scene.add(this.sky);
+
+    const starPositions = new Float32Array(900 * 3);
+    for (let i = 0; i < 900; i++) {
+      const index = i * 3;
+      starPositions[index] = (Math.random() - 0.5) * 4400;
+      starPositions[index + 1] = 250 + Math.random() * 1500;
+      starPositions[index + 2] = (Math.random() - 0.5) * 4400;
+    }
+    const starGeometry = new THREE.BufferGeometry();
+    starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+    this.stars = new THREE.Points(
+      starGeometry,
+      new THREE.PointsMaterial({ color: 0xe7efff, size: 2.2, sizeAttenuation: false, transparent: true, opacity: 0.9 })
+    );
+    this.stars.visible = false;
+    this.stars.renderOrder = -900;
+    scene.add(this.stars);
+
+    this.moon = new THREE.Mesh(
+      new THREE.SphereGeometry(24, 20, 16),
+      new THREE.MeshBasicMaterial({ color: 0xcbd8f3 })
+    );
+    this.moon.visible = false;
+    scene.add(this.moon);
+    this.lightning = new THREE.DirectionalLight(0xdbeafe, 0);
+    this.lightning.position.set(1, 1, 0.3);
+    scene.add(this.lightning);
 
     // 1. Mandatory Studio Environment Reflections via RoomEnvironment
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
@@ -105,6 +138,11 @@ export class EnvironmentSystem {
   }
 
   public update(timeOfDay: number, weather: WeatherType, centerPos: THREE.Vector3, dt: number) {
+    this.sky.position.copy(centerPos);
+    this.stars.position.copy(centerPos);
+    this.moon.position.set(centerPos.x - 600, centerPos.y + 520, centerPos.z - 1200);
+    this.lightning.position.set(centerPos.x + 120, centerPos.y + 220, centerPos.z - 80);
+
     // Sun arc angle (0h to 24h)
     const sunAngle = ((timeOfDay - 6) / 24) * Math.PI * 2;
     const sunDist = 200;
@@ -117,8 +155,21 @@ export class EnvironmentSystem {
     this.dirLight.target.position.copy(centerPos);
     this.dirLight.target.updateMatrixWorld();
 
-    const isNight = timeOfDay < 5.5 || timeOfDay > 19.5;
+    const isNight = timeOfDay < 5.5 || timeOfDay > 19.5 || weather === 'night';
     const isSunset = (timeOfDay >= 17.5 && timeOfDay <= 19.5) || weather === 'sunset';
+    this.stars.visible = isNight && weather !== 'rain';
+    this.moon.visible = isNight && weather !== 'rain';
+    if (weather === 'rain') {
+      this.lightningTimer -= dt;
+      if (this.lightningTimer <= 0) {
+        this.lightningTimer = 7 + Math.random() * 12;
+        this.lightningFlash = 0.16;
+      }
+    } else {
+      this.lightningFlash = 0;
+    }
+    this.lightningFlash = Math.max(0, this.lightningFlash - dt);
+    this.lightning.intensity = this.lightningFlash > 0 ? 2.8 : 0;
 
     // Sky & Lighting Color Palette
     if (weather === 'rain') {
@@ -141,7 +192,7 @@ export class EnvironmentSystem {
         }
         this.rainGeo!.attributes.position.needsUpdate = true;
       }
-    } else if (isNight || weather === 'night') {
+    } else if (isNight) {
       this.setSkyPalette(0x101a3a, 0x374563);
       this.scene.background = new THREE.Color(0x060913);
       (this.scene.fog as THREE.FogExp2).color.setHex(0x090d1a);

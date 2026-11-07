@@ -20,7 +20,22 @@ export interface CharacterRig {
   rightArm: THREE.Group;
   leftLeg: THREE.Group;
   rightLeg: THREE.Group;
-  animate: (speedRatio: number, isJumping: boolean, isSitting: boolean, dt: number) => void;
+  leftElbow: THREE.Group;
+  rightElbow: THREE.Group;
+  leftKnee: THREE.Group;
+  rightKnee: THREE.Group;
+  firstPersonArms: THREE.Group;
+  setFirstPersonDriving: (driving: boolean) => void;
+  updateWatch: (timeOfDay: number) => void;
+  setHandTarget: (side: 'left' | 'right', target: THREE.Vector3 | null) => void;
+  setFootTarget: (side: 'left' | 'right', target: THREE.Vector3 | null) => void;
+  animate: (
+    speedRatio: number,
+    isJumping: boolean,
+    isSitting: boolean,
+    dt: number,
+    state?: { running?: boolean; falling?: boolean; swimming?: boolean; recovering?: number; fatigue?: number }
+  ) => void;
 }
 
 export class ModelFactory {
@@ -53,9 +68,14 @@ export class ModelFactory {
       watch?: boolean;
       bodyShape?: 'masculine' | 'feminine';
       isElderly?: boolean;
+      height?: number;
+      build?: number;
+      hairStyle?: number;
+      facialHair?: boolean;
     }
   ): CharacterRig {
     const root = new THREE.Group();
+    root.scale.set(0.9 + (appearance?.build ?? 1) * 0.1, appearance?.height ?? 1, 0.9 + (appearance?.build ?? 1) * 0.1);
 
     // Contact shadow
     const shadowGeo = new THREE.PlaneGeometry(1.2, 1.2);
@@ -83,8 +103,9 @@ export class ModelFactory {
     });
 
     // Hips / Pelvis
-    const hipWidth = appearance?.bodyShape === 'feminine' ? 0.46 : 0.42;
-    const torsoWidth = appearance?.bodyShape === 'feminine' ? 0.43 : 0.48;
+    const build = appearance?.build ?? 1;
+    const hipWidth = (appearance?.bodyShape === 'feminine' ? 0.46 : 0.42) * build;
+    const torsoWidth = (appearance?.bodyShape === 'feminine' ? 0.43 : 0.48) * build;
     const hips = new THREE.Mesh(new THREE.BoxGeometry(hipWidth, 0.22, 0.26), pantsMat);
     hips.position.y = 0.92;
     root.add(hips);
@@ -102,9 +123,32 @@ export class ModelFactory {
     root.add(head);
 
     // Hair / Cap
-    const hair = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.1, 0.3), hairMat);
-    hair.position.y = 1.92;
-    root.add(hair);
+    const hairStyle = appearance?.hairStyle ?? 0;
+    if (hairStyle !== 4) {
+      const hairHeight = hairStyle === 1 ? 0.04 : hairStyle === 2 || hairStyle === 5 ? 0.16 : 0.1;
+      const hair = new THREE.Mesh(new THREE.BoxGeometry(0.28, hairHeight, 0.3), hairMat);
+      hair.position.y = 1.92 + (hairHeight - 0.1) / 2;
+      root.add(hair);
+      if (hairStyle === 2 || hairStyle === 5) {
+        for (const side of [-1, 1]) {
+          const lock = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.3, 0.1), hairMat);
+          lock.position.set(side * 0.13, 1.78, -0.02);
+          root.add(lock);
+        }
+      }
+      if (hairStyle === 3 || hairStyle === 5) {
+        for (const side of [-1, 1]) {
+          const braid = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.025, 0.34, 6), hairMat);
+          braid.position.set(side * 0.15, 1.61, -0.04);
+          root.add(braid);
+        }
+      }
+    }
+    if (appearance?.facialHair) {
+      const beard = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.1, 0.2), hairMat);
+      beard.position.set(0, 1.66, 0.1);
+      root.add(beard);
+    }
 
     // Sunglasses
     if (appearance?.glasses !== false) {
@@ -135,15 +179,26 @@ export class ModelFactory {
       upperArm.castShadow = true;
       shoulderPivot.add(upperArm);
 
+      const elbowPivot = new THREE.Group();
+      elbowPivot.position.y = -0.34;
+      const lowerArm = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.32, 0.12), clothMat);
+      lowerArm.position.y = -0.16;
+      lowerArm.castShadow = true;
+      elbowPivot.add(lowerArm);
       const hand = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.16, 0.12), skinMat);
-      hand.position.y = -0.42;
-      shoulderPivot.add(hand);
+      hand.position.y = -0.37;
+      elbowPivot.add(hand);
+      shoulderPivot.add(elbowPivot);
 
-      return shoulderPivot;
+      return { shoulder: shoulderPivot, elbow: elbowPivot };
     };
 
-    const leftArm = createArm(true);
-    const rightArm = createArm(false);
+    const leftArmParts = createArm(true);
+    const rightArmParts = createArm(false);
+    const leftArm = leftArmParts.shoulder;
+    const rightArm = rightArmParts.shoulder;
+    const leftElbow = leftArmParts.elbow;
+    const rightElbow = rightArmParts.elbow;
     root.add(leftArm, rightArm);
 
     // Legs
@@ -156,63 +211,209 @@ export class ModelFactory {
       thigh.castShadow = true;
       hipPivot.add(thigh);
 
+      const kneePivot = new THREE.Group();
+      kneePivot.position.y = -0.44;
       const calf = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.4, 0.16), pantsMat);
-      calf.position.y = -0.58;
+      calf.position.y = -0.2;
       calf.castShadow = true;
-      hipPivot.add(calf);
+      kneePivot.add(calf);
 
       const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.12, 0.28), shoeMat);
-      shoe.position.set(0, -0.82, 0.05);
-      hipPivot.add(shoe);
+      shoe.position.set(0, -0.42, 0.05);
+      kneePivot.add(shoe);
+      hipPivot.add(kneePivot);
 
-      return hipPivot;
+      return { hip: hipPivot, knee: kneePivot };
     };
 
-    const leftLeg = createLeg(true);
-    const rightLeg = createLeg(false);
+    const leftLegParts = createLeg(true);
+    const rightLegParts = createLeg(false);
+    const leftLeg = leftLegParts.hip;
+    const rightLeg = rightLegParts.hip;
+    const leftKnee = leftLegParts.knee;
+    const rightKnee = rightLegParts.knee;
     root.add(leftLeg, rightLeg);
 
-    let walkCycle = 0;
+    const firstPersonArms = new THREE.Group();
+    firstPersonArms.position.set(0, -0.1, -0.8);
+    const viewmodelSleeveMat = clothMat.clone();
+    const viewmodelHandMat = skinMat.clone();
+    for (const side of [-1, 1]) {
+      const forearm = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.48, 0.13), viewmodelSleeveMat);
+      forearm.position.set(side * 0.2, -0.2, -0.08);
+      forearm.rotation.x = -0.65;
+      firstPersonArms.add(forearm);
+      const palm = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.13, 0.12), viewmodelHandMat);
+      palm.position.set(side * 0.2, -0.02, -0.23);
+      firstPersonArms.add(palm);
+    }
+    const steeringWheel = new THREE.Group();
+    steeringWheel.position.set(0, -0.12, 0.1);
+    steeringWheel.add(
+      new THREE.Mesh(
+        new THREE.TorusGeometry(0.26, 0.025, 8, 24),
+        new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.55 })
+      )
+    );
+    const wheelHub = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.055, 0.055, 0.045, 12),
+      new THREE.MeshStandardMaterial({ color: 0x374151, metalness: 0.65, roughness: 0.35 })
+    );
+    wheelHub.rotation.x = Math.PI / 2;
+    steeringWheel.add(wheelHub);
+    for (const angle of [0, (Math.PI * 2) / 3, (Math.PI * 4) / 3]) {
+      const spoke = new THREE.Mesh(
+        new THREE.BoxGeometry(0.022, 0.22, 0.025),
+        new THREE.MeshStandardMaterial({ color: 0x374151, metalness: 0.65, roughness: 0.35 })
+      );
+      spoke.rotation.z = angle;
+      steeringWheel.add(spoke);
+    }
+    steeringWheel.visible = false;
+    firstPersonArms.add(steeringWheel);
+    const setFirstPersonDriving = (driving: boolean) => {
+      steeringWheel.visible = driving;
+    };
+    let watchTexture: THREE.CanvasTexture | null = null;
+    if (appearance?.watch) {
+      const watch = new THREE.Mesh(
+        new THREE.BoxGeometry(0.1, 0.07, 0.12),
+        new THREE.MeshStandardMaterial({ color: 0x111827, metalness: 0.8, roughness: 0.25 })
+      );
+      watch.position.set(-0.2, -0.14, -0.18);
+      firstPersonArms.add(watch);
+      const displayCanvas = document.createElement('canvas');
+      displayCanvas.width = 128;
+      displayCanvas.height = 64;
+      watchTexture = new THREE.CanvasTexture(displayCanvas);
+      const display = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.082, 0.042),
+        new THREE.MeshBasicMaterial({ map: watchTexture })
+      );
+      display.position.set(-0.2, -0.14, -0.244);
+      firstPersonArms.add(display);
+    }
+    const updateWatch = (timeOfDay: number) => {
+      if (!watchTexture) return;
+      const canvas = watchTexture.image as HTMLCanvasElement;
+      const context = canvas.getContext('2d');
+      if (!context) return;
+      const hours = Math.floor(timeOfDay) % 24;
+      const minutes = Math.floor((timeOfDay - Math.floor(timeOfDay)) * 60);
+      const currentMinute = hours * 60 + minutes;
+      if (currentMinute === lastWatchMinute) return;
+      lastWatchMinute = currentMinute;
+      context.fillStyle = '#07111a';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.fillStyle = '#5ef7c2';
+      context.font = 'bold 38px monospace';
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+      context.fillText(`${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`, 64, 34);
+      watchTexture.needsUpdate = true;
+    };
 
-    const animate = (speedRatio: number, isJumping: boolean, isSitting: boolean, dt: number) => {
-      if (isSitting) {
-        // Sitting in car
-        leftLeg.rotation.x = -Math.PI / 2.3;
-        rightLeg.rotation.x = -Math.PI / 2.3;
-        leftArm.rotation.x = -Math.PI / 3;
-        rightArm.rotation.x = -Math.PI / 3;
-        root.position.y = -0.35;
+    let walkCycle = 0;
+    let blend = 0;
+    let lastWatchMinute = -1;
+    const baseRootHeight = 0;
+    const setLimbTarget = (
+      side: 'left' | 'right',
+      target: THREE.Vector3 | null,
+      isArm: boolean
+    ) => {
+      const pivot = isArm ? (side === 'left' ? leftArm : rightArm) : (side === 'left' ? leftLeg : rightLeg);
+      const joint = isArm ? (side === 'left' ? leftElbow : rightElbow) : (side === 'left' ? leftLegParts.knee : rightLegParts.knee);
+      if (!target) {
+        pivot.rotation.x = 0;
+        joint.rotation.x = 0;
         return;
       }
 
-      root.position.y = 0;
+      root.updateMatrixWorld(true);
+      const localTarget = root.worldToLocal(target.clone());
+      const originY = isArm ? 1.54 : 0.88;
+      const dx = localTarget.x - pivot.position.x;
+      const dy = localTarget.y - originY;
+      const dz = localTarget.z;
+      const upperLength = isArm ? 0.34 : 0.44;
+      const lowerLength = isArm ? 0.32 : 0.4;
+      const distance = THREE.MathUtils.clamp(Math.hypot(dx, dy, dz), 0.05, upperLength + lowerLength - 0.001);
+      const cosine = THREE.MathUtils.clamp(
+        (upperLength ** 2 + lowerLength ** 2 - distance ** 2) / (2 * upperLength * lowerLength),
+        -1,
+        1
+      );
+      const flexion = Math.PI - Math.acos(cosine);
+      pivot.rotation.x = Math.atan2(-dz, -dy);
+      pivot.rotation.z = Math.atan2(dx, Math.max(0.001, -dy)) * (side === 'left' ? 1 : -1);
+      joint.rotation.x = isArm ? -flexion : flexion;
+    };
 
-      if (isJumping) {
+    const setHandTarget = (side: 'left' | 'right', target: THREE.Vector3 | null) =>
+      setLimbTarget(side, target, true);
+    const setFootTarget = (side: 'left' | 'right', target: THREE.Vector3 | null) =>
+      setLimbTarget(side, target, false);
+
+    const animate = (
+      speedRatio: number,
+      isJumping: boolean,
+      isSitting: boolean,
+      dt: number,
+      state: { running?: boolean; falling?: boolean; swimming?: boolean; recovering?: number; fatigue?: number } = {}
+    ) => {
+      const fatigue = THREE.MathUtils.clamp(state.fatigue ?? 0, 0, 1);
+      const moving = THREE.MathUtils.clamp(speedRatio, 0, 1.8);
+      const targetBlend = isSitting ? 0 : moving;
+      blend += (targetBlend - blend) * Math.min(1, dt * 9);
+      walkCycle += dt * (state.running ? 16 : 11) * Math.max(0.15, moving);
+
+      const stride = Math.sin(walkCycle) * 0.66 * blend;
+      const kneeFlex = Math.max(0, Math.sin(walkCycle)) * 0.72 * blend;
+      const breathe = Math.sin(walkCycle * 0.18) * (0.012 + fatigue * 0.02);
+      root.position.y = baseRootHeight + (isSitting ? -0.35 : state.swimming ? -0.42 : 0);
+      root.rotation.x = state.falling ? 0.12 : state.swimming ? -0.12 : 0;
+      torso.position.y = 1.32 + breathe + (blend > 0.05 ? Math.abs(Math.sin(walkCycle * 2)) * 0.025 : 0);
+      leftArm.rotation.z = rightArm.rotation.z = 0;
+      leftLeg.rotation.z = rightLeg.rotation.z = 0;
+
+      if (isSitting) {
+        leftLeg.rotation.x = rightLeg.rotation.x = -Math.PI / 2.3;
+        leftArm.rotation.x = rightArm.rotation.x = -Math.PI / 3;
+        leftElbow.rotation.x = rightElbow.rotation.x = -0.25;
+        leftKnee.rotation.x = rightKnee.rotation.x = 0;
+      } else if (state.swimming) {
+        leftLeg.rotation.x = 0.55 + Math.sin(walkCycle) * 0.38;
+        rightLeg.rotation.x = 0.55 - Math.sin(walkCycle) * 0.38;
+        leftKnee.rotation.x = rightKnee.rotation.x = 0.45;
+        leftArm.rotation.x = -1.25 + Math.sin(walkCycle) * 0.35;
+        rightArm.rotation.x = -1.25 - Math.sin(walkCycle) * 0.35;
+        leftElbow.rotation.x = rightElbow.rotation.x = -0.6;
+      } else if (isJumping || state.falling) {
         leftLeg.rotation.x = -0.4;
         rightLeg.rotation.x = 0.3;
-        leftArm.rotation.x = -1.2;
-        rightArm.rotation.x = -1.2;
-        return;
-      }
-
-      if (speedRatio > 0.05) {
-        walkCycle += dt * speedRatio * 14;
-        const swing = Math.sin(walkCycle) * 0.7 * Math.min(1.2, speedRatio);
-
-        leftLeg.rotation.x = swing;
-        rightLeg.rotation.x = -swing;
-        leftArm.rotation.x = -swing * 0.9;
-        rightArm.rotation.x = swing * 0.9;
-        torso.position.y = 1.32 + Math.abs(Math.sin(walkCycle * 2)) * 0.04;
+        leftKnee.rotation.x = 0.35;
+        rightKnee.rotation.x = 0.5;
+        leftArm.rotation.x = rightArm.rotation.x = -1.2;
+        leftElbow.rotation.x = rightElbow.rotation.x = -0.35;
+      } else if ((state.recovering ?? 0) > 0) {
+        const recovery = THREE.MathUtils.clamp((state.recovering ?? 0) / 0.55, 0, 1);
+        leftLeg.rotation.x = rightLeg.rotation.x = -0.2 * recovery;
+        leftKnee.rotation.x = rightKnee.rotation.x = 0.4 * recovery;
+        leftArm.rotation.x = rightArm.rotation.x = -0.75 * recovery;
+        leftElbow.rotation.x = rightElbow.rotation.x = -0.3 * recovery;
       } else {
-        // Idle breathing
-        const breathe = Math.sin(Date.now() * 0.003) * 0.02;
-        leftLeg.rotation.x = 0;
-        rightLeg.rotation.x = 0;
-        leftArm.rotation.x = breathe;
-        rightArm.rotation.x = breathe;
-        torso.position.y = 1.32 + breathe;
+        leftLeg.rotation.x = stride;
+        rightLeg.rotation.x = -stride;
+        leftKnee.rotation.x = kneeFlex;
+        rightKnee.rotation.x = Math.max(0, -Math.sin(walkCycle)) * 0.72 * blend;
+        leftArm.rotation.x = -stride * 0.7 + breathe;
+        rightArm.rotation.x = stride * 0.7 + breathe;
+        leftElbow.rotation.x = -0.08 - kneeFlex * 0.35;
+        rightElbow.rotation.x = -0.08 - Math.max(0, -Math.sin(walkCycle)) * 0.25;
       }
+
+      firstPersonArms.position.y = -0.1 + Math.sin(walkCycle * 2) * 0.012 * blend;
     };
 
     return {
@@ -223,6 +424,15 @@ export class ModelFactory {
       rightArm,
       leftLeg,
       rightLeg,
+      leftElbow,
+      rightElbow,
+      leftKnee: leftLegParts.knee,
+      rightKnee: rightLegParts.knee,
+      firstPersonArms,
+      setFirstPersonDriving,
+      updateWatch,
+      setHandTarget,
+      setFootTarget,
       animate
     };
   }

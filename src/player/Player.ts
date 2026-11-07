@@ -15,9 +15,11 @@ export class Player {
   public isSprinting = false;
   public currentVehicleIndex: number | null = null;
   public currentGroundElevation = 0;
+  public isSwimming = false;
 
   // Attached Weapon Meshes in Right Hand
   public weaponMeshes: Partial<Record<WeaponType, THREE.Group>> = {};
+  private firstPersonWeaponMeshes: Partial<Record<WeaponType, THREE.Group>> = {};
   public muzzlePoint: THREE.Vector3 = new THREE.Vector3();
 
   private walkSpeed = 5.2; // m/s
@@ -25,6 +27,7 @@ export class Player {
   private jumpForce = 8.5; // m/s
   private gravity = -24.0;
   private footstepTimer = 0;
+  private landingRecovery = 0;
 
   constructor(startPos: THREE.Vector3) {
     const store = useGameStore.getState();
@@ -53,9 +56,9 @@ export class Player {
     pGrip.position.set(0, -0.09, 0.02);
     pGrip.rotation.x = -0.2;
     pistol.add(pSlide, pGrip);
-    pistol.position.set(0, -0.44, 0.12);
+    pistol.position.set(0, -0.1, 0.12);
     pistol.rotation.x = Math.PI / 2;
-    this.rig.rightArm.add(pistol);
+    this.rig.rightElbow.add(pistol);
     this.weaponMeshes.pistol = pistol;
 
     // Combat knife
@@ -71,9 +74,9 @@ export class Player {
     );
     knifeHandle.position.z = -0.02;
     knife.add(blade, knifeHandle);
-    knife.position.set(0, -0.44, 0.12);
+    knife.position.set(0, -0.1, 0.12);
     knife.rotation.x = Math.PI / 2;
-    this.rig.rightArm.add(knife);
+    this.rig.rightElbow.add(knife);
     this.weaponMeshes.knife = knife;
 
     // 2. SMG Mesh
@@ -86,9 +89,9 @@ export class Player {
     const smgMag = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.18, 0.06), gunMat);
     smgMag.position.set(0, -0.12, 0.18);
     smg.add(smgBody, smgGrip, smgMag);
-    smg.position.set(0, -0.44, 0.12);
+    smg.position.set(0, -0.1, 0.12);
     smg.rotation.x = Math.PI / 2;
-    this.rig.rightArm.add(smg);
+    this.rig.rightElbow.add(smg);
     this.weaponMeshes.smg = smg;
 
     // 3. Rifle Mesh
@@ -104,19 +107,32 @@ export class Player {
     rMag.position.set(0, -0.14, 0.22);
     rMag.rotation.x = 0.2;
     rifle.add(rBody, rStock, rGrip, rMag);
-    rifle.position.set(0, -0.44, 0.12);
+    rifle.position.set(0, -0.1, 0.12);
     rifle.rotation.x = Math.PI / 2;
-    this.rig.rightArm.add(rifle);
+    this.rig.rightElbow.add(rifle);
     this.weaponMeshes.rifle = rifle;
+
+    for (const [weaponType, weapon] of Object.entries(this.weaponMeshes)) {
+      if (!weapon) continue;
+      const viewmodelWeapon = weapon.clone(true);
+      viewmodelWeapon.position.set(0.03, -0.02, -0.12);
+      viewmodelWeapon.rotation.set(0, Math.PI, 0);
+      this.rig.firstPersonArms.add(viewmodelWeapon);
+      this.firstPersonWeaponMeshes[weaponType as WeaponType] = viewmodelWeapon;
+    }
 
     this.updateActiveWeaponMesh('pistol');
   }
 
   public updateActiveWeaponMesh(weapon: WeaponType) {
-    if (this.weaponMeshes.pistol) this.weaponMeshes.pistol.visible = weapon === 'pistol';
-    if (this.weaponMeshes.knife) this.weaponMeshes.knife.visible = weapon === 'knife';
-    if (this.weaponMeshes.smg) this.weaponMeshes.smg.visible = weapon === 'smg';
-    if (this.weaponMeshes.rifle) this.weaponMeshes.rifle.visible = weapon === 'rifle';
+    for (const weaponType of ['pistol', 'knife', 'smg', 'rifle'] as const) {
+      const worldWeapon = this.weaponMeshes[weaponType];
+      if (worldWeapon) worldWeapon.visible = weapon === weaponType;
+      if (this.firstPersonWeaponMeshes[weaponType]) {
+        this.firstPersonWeaponMeshes[weaponType]!.visible =
+          weapon === weaponType && this.currentVehicleIndex === null;
+      }
+    }
   }
 
   public update(
@@ -139,10 +155,17 @@ export class Player {
       return;
     }
 
+    this.isSwimming =
+      this.position.z >= 358 &&
+      this.position.z <= 535 &&
+      Math.abs(this.position.x) < 550;
+
     // Fatigue affects speed when energy < 20%
     const fatigueFactor = store.energy < 20 ? 0.7 : 1.0;
     this.isSprinting = input.sprint && store.energy > 5 && !store.isAiming;
-    const moveSpeed = (this.isSprinting ? this.sprintSpeed : this.walkSpeed) * fatigueFactor;
+    const moveSpeed = (this.isSprinting ? this.sprintSpeed : this.walkSpeed) *
+      fatigueFactor *
+      (this.isSwimming ? 0.55 : 1);
 
     // CAMERA-RELATIVE FORWARD & RIGHT GROUND VECTORS
     // When camera is behind player looking into the screen, forward is -sin(yaw) on X, -cos(yaw) on Z.
@@ -179,11 +202,12 @@ export class Player {
       this.velocity.z = normZ * speed;
 
       // Footstep audio
-      if (this.isGrounded) {
-        this.footstepTimer += dt * (this.isSprinting ? 2.5 : 1.6);
-        if (this.footstepTimer >= 0.5) {
+      if (this.isGrounded || this.isSwimming) {
+        this.footstepTimer += dt * (this.isSwimming ? 1.2 : this.isSprinting ? 2.5 : 1.6);
+        if (this.footstepTimer >= (this.isSwimming ? 0.8 : 0.5)) {
           this.footstepTimer = 0;
-          audioManager.playFootstep();
+          if (this.isSwimming) audioManager.playWaterSplash();
+          else audioManager.playFootstep();
         }
       }
     } else {
@@ -208,7 +232,14 @@ export class Player {
       this.isGrounded = false;
     }
 
-    this.velocity.y += this.gravity * dt;
+    if (this.isSwimming) {
+      const waterTarget = input.sprint ? -1.35 : -0.68;
+      this.velocity.y += (waterTarget - this.position.y) * 3 * dt - this.velocity.y * 2.4 * dt;
+      if (input.jump) this.velocity.y = Math.min(2.2, this.velocity.y + 1.4 * dt);
+      this.velocity.y = THREE.MathUtils.clamp(this.velocity.y, -2.5, 2.2);
+    } else {
+      this.velocity.y += this.gravity * dt;
+    }
 
     // Proposed new position
     const nextX = this.position.x + this.velocity.x * dt;
@@ -252,7 +283,11 @@ export class Player {
     else this.velocity.z = 0;
 
     // Vertical Collision against Ground
-    if (nextY <= targetGroundY) {
+    const landed = !this.isSwimming && nextY <= targetGroundY && !this.isGrounded && this.velocity.y < -2;
+    if (this.isSwimming) {
+      this.position.y = Math.max(-1.6, nextY);
+      this.isGrounded = false;
+    } else if (nextY <= targetGroundY) {
       this.position.y = targetGroundY;
       this.velocity.y = 0;
       this.isGrounded = true;
@@ -260,22 +295,44 @@ export class Player {
       this.position.y = nextY;
       this.isGrounded = false;
     }
+    if (landed) this.landingRecovery = 0.55;
+    else this.landingRecovery = Math.max(0, this.landingRecovery - dt);
 
-    // Ocean fall respawn
-    if (this.position.z > 248) {
+    // Keep swimmers in the bay and respawn if they leave the playable water bounds.
+    if (this.isSwimming && (this.position.z > 535 || Math.abs(this.position.x) >= 550)) {
       this.position.set(90, 0, 190);
       this.velocity.set(0, 0, 0);
+      this.isSwimming = false;
     }
 
     // Rig procedural animation & Arm Aiming Pose
     const currentSpeed = Math.hypot(this.velocity.x, this.velocity.z);
     const speedRatio = currentSpeed / this.walkSpeed;
-    this.rig.animate(speedRatio, !this.isGrounded, false, dt);
+    this.rig.animate(speedRatio, !this.isGrounded && !this.isSwimming, false, dt, {
+      running: this.isSprinting,
+      falling: !this.isGrounded && !this.isSwimming && this.velocity.y < -0.5,
+      swimming: this.isSwimming,
+      recovering: this.landingRecovery,
+      fatigue: 1 - store.energy / 100
+    });
+
+    if (this.isGrounded && speedRatio < 0.05) {
+      const leftFoot = this.group.localToWorld(new THREE.Vector3(-0.14, 0.06, 0.05));
+      const rightFoot = this.group.localToWorld(new THREE.Vector3(0.14, 0.06, 0.05));
+      this.rig.setFootTarget('left', leftFoot);
+      this.rig.setFootTarget('right', rightFoot);
+    }
 
     // Aiming arm pose override when holding weapon
     if (store.currentWeapon !== 'fists' && (store.isAiming || inputLen > 0.05)) {
-      this.rig.rightArm.rotation.x = -Math.PI / 2 + 0.1;
-      this.rig.rightArm.rotation.y = 0.15;
+      this.rig.setHandTarget(
+        'right',
+        this.group.localToWorld(new THREE.Vector3(0.3, 1.2, 0.55))
+      );
+      this.rig.setHandTarget(
+        'left',
+        this.group.localToWorld(new THREE.Vector3(-0.25, 1.22, 0.45))
+      );
     }
 
     // Update muzzle world position for bullet spawning
@@ -287,13 +344,19 @@ export class Player {
     const store = useGameStore.getState();
     const app = store.appearance;
     (this.rig.torso.material as THREE.MeshStandardMaterial).color.setHex(app.jacketColor);
-    const leftMesh = this.rig.leftLeg.children[0] as THREE.Mesh;
-    const rightMesh = this.rig.rightLeg.children[0] as THREE.Mesh;
-    if (leftMesh?.material) {
-      (leftMesh.material as THREE.MeshStandardMaterial).color.setHex(app.pantsColor);
+    for (const leg of [this.rig.leftLeg, this.rig.rightLeg]) {
+      const thigh = leg.children[0] as THREE.Mesh;
+      const knee = leg.children[1] as THREE.Group;
+      const calf = knee.children[0] as THREE.Mesh;
+      const shoe = knee.children[1] as THREE.Mesh;
+      for (const garment of [thigh, calf]) {
+        if (garment.material) (garment.material as THREE.MeshStandardMaterial).color.setHex(app.pantsColor);
+      }
+      if (shoe.material) (shoe.material as THREE.MeshStandardMaterial).color.setHex(app.shoesColor);
     }
-    if (rightMesh?.material) {
-      (rightMesh.material as THREE.MeshStandardMaterial).color.setHex(app.pantsColor);
+    for (const index of [0, 2]) {
+      const sleeve = this.rig.firstPersonArms.children[index] as THREE.Mesh;
+      (sleeve.material as THREE.MeshStandardMaterial).color.setHex(app.jacketColor);
     }
   }
 
@@ -312,8 +375,13 @@ export class Player {
     this.rig.torso.rotation.set(0, 0, 0);
     this.rig.leftArm.rotation.set(0, 0, 0);
     this.rig.rightArm.rotation.set(0, 0, 0);
+    this.rig.leftElbow.rotation.set(0, 0, 0);
+    this.rig.rightElbow.rotation.set(0, 0, 0);
     this.rig.leftLeg.rotation.set(0, 0, 0);
     this.rig.rightLeg.rotation.set(0, 0, 0);
+    this.rig.leftKnee.rotation.set(0, 0, 0);
+    this.rig.rightKnee.rotation.set(0, 0, 0);
+    this.landingRecovery = 0;
   }
 
   public respawn(pos: THREE.Vector3) {
@@ -322,6 +390,7 @@ export class Player {
     this.heading = 0;
     this.group.rotation.y = 0;
     this.currentVehicleIndex = null;
+    this.isSwimming = false;
     this.group.visible = true;
     this.resetPose();
   }

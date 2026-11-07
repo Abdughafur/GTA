@@ -14,16 +14,16 @@ export const PhoneMap: React.FC = () => {
   const distanceToObjective = useGameStore((s) => s.distanceToObjective);
   const currentFloor = useGameStore((s) => s.currentFloor);
 
-  // Map coordinate conversion: World (-200..200) to SVG viewbox (0..400)
+  // Map coordinate conversion: World (-1500..1500) to SVG viewbox (0..400)
   const worldToMap = (x: number, z: number) => {
-    const mapX = ((x + 200) / 400) * 400;
-    const mapY = ((z + 200) / 400) * 400;
+    const mapX = ((x + 1500) / 3000) * 400;
+    const mapY = ((z + 1500) / 3000) * 400;
     return { x: mapX, y: mapY };
   };
 
   const mapToWorld = (mapX: number, mapY: number): [number, number, number] => {
-    const x = (mapX / 400) * 400 - 200;
-    const z = (mapY / 400) * 400 - 200;
+    const x = Math.max(-1480, Math.min(1480, (mapX / 400) * 3000 - 1500));
+    const z = Math.max(-1480, Math.min(1480, (mapY / 400) * 3000 - 1500));
     return [Math.round(x), 0, Math.round(z)];
   };
 
@@ -81,42 +81,84 @@ export const PhoneMap: React.FC = () => {
       {viewMode === 'city' ? (
         <div className="relative flex-1 bg-slate-900 overflow-hidden cursor-crosshair">
           <svg viewBox="0 0 400 400" className="w-full h-full" onClick={handleMapClick}>
-            {/* Ocean */}
-            <rect x="0" y="320" width="400" height="80" fill="#0369a1" opacity="0.6" />
-            <text x="200" y="365" fill="#38bdf8" fontSize="12" textAnchor="middle" fontWeight="bold" opacity="0.5">
+            {/* Coastline and ocean */}
+            <rect x="140" y="248" width="120" height="24" fill="#0369a1" opacity="0.6" />
+            <text x="200" y="264" fill="#38bdf8" fontSize="3.5" textAnchor="middle" fontWeight="bold" opacity="0.8">
               VICE BAY WATERWAY
             </text>
 
-            {/* Road Network Lines */}
-            <line x1="30" y1="60" x2="370" y2="60" stroke="#334155" strokeWidth="18" strokeLinecap="round" />
-            <line x1="30" y1="160" x2="370" y2="160" stroke="#334155" strokeWidth="18" strokeLinecap="round" />
-            <line x1="30" y1="260" x2="370" y2="260" stroke="#334155" strokeWidth="18" strokeLinecap="round" />
+            {Array.from({ length: 30 }, (_, index) => -1440 + index * 100).map((road) => {
+              const vertical = worldToMap(road, 0).x;
+              const horizontal = worldToMap(0, road).y;
+              return (
+                <g key={`outer-road-${road}`} stroke="#334155" strokeWidth="0.65" opacity="0.65">
+                  <line x1={vertical} y1="0" x2={vertical} y2="400" />
+                  <line x1="0" y1={horizontal} x2="400" y2={horizontal} />
+                </g>
+              );
+            })}
 
-            <line x1="40" y1="40" x2="40" y2="280" stroke="#334155" strokeWidth="18" strokeLinecap="round" />
-            <line x1="140" y1="40" x2="140" y2="280" stroke="#334155" strokeWidth="18" strokeLinecap="round" />
-            <line x1="240" y1="40" x2="240" y2="280" stroke="#334155" strokeWidth="18" strokeLinecap="round" />
-            <line x1="340" y1="40" x2="340" y2="280" stroke="#334155" strokeWidth="18" strokeLinecap="round" />
+            {/* Legacy downtown map art, scaled to its true place in the expanded world. */}
+            <g transform="translate(173.333 173.333) scale(0.133333)">
+              {/* Road Network Lines */}
+              <line x1="30" y1="60" x2="370" y2="60" stroke="#334155" strokeWidth="18" strokeLinecap="round" />
+              <line x1="30" y1="160" x2="370" y2="160" stroke="#334155" strokeWidth="18" strokeLinecap="round" />
+              <line x1="30" y1="260" x2="370" y2="260" stroke="#334155" strokeWidth="18" strokeLinecap="round" />
 
-            {/* District Highlights */}
-            {/* Safehouse Grand Tower */}
-            <rect x="180" y="140" width="30" height="30" fill="#065f46" rx="4" stroke="#10b981" strokeWidth="1.5" />
-            <text x="195" y="158" fill="#34d399" fontSize="7" textAnchor="middle" fontWeight="bold">TOWER</text>
+              <line x1="40" y1="40" x2="40" y2="280" stroke="#334155" strokeWidth="18" strokeLinecap="round" />
+              <line x1="140" y1="40" x2="140" y2="280" stroke="#334155" strokeWidth="18" strokeLinecap="round" />
+              <line x1="240" y1="40" x2="240" y2="280" stroke="#334155" strokeWidth="18" strokeLinecap="round" />
+              <line x1="340" y1="40" x2="340" y2="280" stroke="#334155" strokeWidth="18" strokeLinecap="round" />
 
-            {/* Downtown Financial */}
-            <rect x="155" y="75" width="70" height="60" fill="#1e293b" rx="4" stroke="#475569" strokeWidth="1" />
-            <text x="190" y="105" fill="#94a3b8" fontSize="8" textAnchor="middle" fontWeight="bold">DOWNTOWN</text>
+              {/* District Highlights */}
+              {/* Safehouse Grand Tower */}
+              <rect x="180" y="140" width="30" height="30" fill="#065f46" rx="4" stroke="#10b981" strokeWidth="1.5" />
+              <text x="195" y="158" fill="#34d399" fontSize="7" textAnchor="middle" fontWeight="bold">TOWER</text>
 
-            {/* Legendary Dealership */}
-            <rect x="255" y="75" width="70" height="70" fill="#450a0a" rx="4" stroke="#dc2626" strokeWidth="1" />
-            <text x="290" y="115" fill="#f87171" fontSize="8" textAnchor="middle" fontWeight="bold">DEALERSHIP</text>
+              {/* Downtown Financial */}
+              <rect x="155" y="75" width="70" height="60" fill="#1e293b" rx="4" stroke="#475569" strokeWidth="1" />
+              <text x="190" y="105" fill="#94a3b8" fontSize="8" textAnchor="middle" fontWeight="bold">DOWNTOWN</text>
 
-            {/* Pay 'n' Spray Garage */}
-            <rect x="255" y="175" width="70" height="70" fill="#172554" rx="4" stroke="#2563eb" strokeWidth="1" />
-            <text x="290" y="215" fill="#60a5fa" fontSize="8" textAnchor="middle" fontWeight="bold">GARAGE</text>
+              {/* Legendary Dealership */}
+              <rect x="255" y="75" width="70" height="70" fill="#450a0a" rx="4" stroke="#dc2626" strokeWidth="1" />
+              <text x="290" y="115" fill="#f87171" fontSize="8" textAnchor="middle" fontWeight="bold">DEALERSHIP</text>
 
-            {/* Hospital Ward */}
-            <rect x="75" y="75" width="50" height="50" fill="#881337" rx="4" stroke="#f43f5e" strokeWidth="1" />
-            <text x="100" y="105" fill="#fb7185" fontSize="7" textAnchor="middle" fontWeight="bold">HOSPITAL</text>
+              {/* Pay 'n' Spray Garage */}
+              <rect x="255" y="175" width="70" height="70" fill="#172554" rx="4" stroke="#2563eb" strokeWidth="1" />
+              <text x="290" y="215" fill="#60a5fa" fontSize="8" textAnchor="middle" fontWeight="bold">GARAGE</text>
+
+              {/* Hospital Ward */}
+              <rect x="75" y="75" width="50" height="50" fill="#881337" rx="4" stroke="#f43f5e" strokeWidth="1" />
+              <text x="100" y="105" fill="#fb7185" fontSize="7" textAnchor="middle" fontWeight="bold">HOSPITAL</text>
+            </g>
+
+            {[
+              { x: -20, z: -90, label: 'FINANCIAL DISTRICT' },
+              { x: -110, z: 120, label: 'PORT VICE' },
+              { x: 100, z: 140, label: 'MARINA' },
+              { x: 180, z: -300, label: 'FRESH MARKET' },
+              { x: 0, z: 315, label: 'SUNSET BEACH' },
+              { x: 325, z: -170, label: 'AIRPORT' },
+              { x: 325, z: 120, label: 'FARMS' },
+              { x: -1200, z: -900, label: 'STADIUM' },
+              { x: -900, z: -900, label: 'UNIVERSITY' },
+              { x: 0, z: -1000, label: 'CASTLE' },
+              { x: 900, z: -600, label: 'AIR BASE' },
+              { x: -900, z: 0, label: 'OLD MARKET' },
+              { x: -900, z: 900, label: 'SOUTHSIDE' },
+              { x: 0, z: 900, label: 'GRAND PARK' },
+              { x: 900, z: 700, label: 'VILLAS' }
+            ].map((district) => {
+              const point = worldToMap(district.x, district.z);
+              return (
+                <g key={district.label}>
+                  <circle cx={point.x} cy={point.y} r="2.5" fill="#f59e0b" stroke="#fef3c7" strokeWidth="0.8" />
+                  <text x={point.x} y={point.y - 4} fill="#fcd34d" fontSize="7" textAnchor="middle" fontWeight="bold">
+                    {district.label}
+                  </text>
+                </g>
+              );
+            })}
 
             {/* GPS Route Line if active */}
             {(waypointMap || missionMap) && (

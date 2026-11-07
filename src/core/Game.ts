@@ -14,6 +14,7 @@ import { useGameStore, JobType } from './gameState';
 import { buildingInteriors } from '../world/BuildingInteriors';
 import { furnitureFactory } from '../world/FurnitureFactory';
 import { transitSystem } from '../world/TransitSystem';
+import { WorldChunkStreamer } from '../world/WorldChunkStreamer';
 
 export class Game {
   public scene: THREE.Scene;
@@ -21,6 +22,7 @@ export class Game {
   public renderer: THREE.WebGLRenderer;
   private environmentSystem!: EnvironmentSystem;
   private cityData!: CityData;
+  private worldChunkStreamer!: WorldChunkStreamer;
 
   public player!: Player;
   public vehicles: Vehicle[] = [];
@@ -40,6 +42,7 @@ export class Game {
   private animFrameId = 0;
   private lastTime = 0;
   private simulationTime = 0;
+  private worldTimeAccumulator = 0;
   private currentDistrict = '';
   private simulationAccumulator = 0;
   private customizedVehicle: Vehicle | null = null;
@@ -48,6 +51,7 @@ export class Game {
   private readonly fixedStep = 1 / 60;
   private isRunning = false;
   private isSoftwareGl = false;
+  private firstPersonViewmodelRoot = new THREE.Group();
 
   // Input states
   public keys: { [key: string]: boolean } = {};
@@ -99,6 +103,7 @@ export class Game {
     // 2. Scene & Camera
     this.scene = new THREE.Scene();
     this.cameraController = new CameraController(65, container.clientWidth / container.clientHeight);
+    this.scene.add(this.cameraController.camera);
     this.cameraController.yaw = useGameStore.getState().playerHeading;
 
     // 3. Initialize Game Systems
@@ -120,6 +125,7 @@ export class Game {
     // City & Colliders
     this.cityData = cityGenerator.generateCity();
     this.scene.add(this.cityData.cityGroup);
+    this.worldChunkStreamer = new WorldChunkStreamer(this.scene, this.cityData.colliders);
     store.setLoading(45, 'Synthesizing PBR Textures & Multi-Floor Interiors...');
 
     // Multi-Floor Building Interiors (Safehouse, Penthouse, Elevator, Hospital)
@@ -149,6 +155,8 @@ export class Game {
     // Player Spawn
     this.player = new Player(new THREE.Vector3(...store.playerPos));
     this.scene.add(this.player.group);
+    this.firstPersonViewmodelRoot.add(this.player.rig.firstPersonArms);
+    this.scene.add(this.firstPersonViewmodelRoot);
     this.currentDistrict = getDistrictName(this.player.position.x, this.player.position.z);
     store.setLoading(60, 'Assembling High-Performance Vehicle Rigs...');
 
@@ -232,7 +240,29 @@ export class Game {
 
   private bindInputs() {
     window.addEventListener('keydown', (e) => {
+      const store = useGameStore.getState();
+      if (store.supermarketOpen) {
+        this.keys[e.code] = false;
+        if (e.code === 'Escape') {
+          store.closeSupermarket();
+          e.preventDefault();
+          e.stopImmediatePropagation();
+        }
+        return;
+      }
+
+      if (store.isInventoryOpen && e.code !== 'KeyI' && e.code !== 'Escape') return;
+      if (store.isInventoryOpen && e.code === 'Escape') {
+        store.setInventoryOpen(false);
+        e.preventDefault();
+        return;
+      }
+
       this.keys[e.code] = true;
+
+      if (e.code === 'KeyI' && !e.repeat && !store.isPhoneOpen) {
+        store.toggleInventory();
+      }
 
       // Enter / Exit Vehicle on 'E'
       if (e.code === 'KeyE') {
@@ -247,10 +277,15 @@ export class Game {
       }
 
       // Context Action Key 'KeyF'
-      if (e.code === 'KeyF') {
-        const store = useGameStore.getState();
-        // Check building interior props first (beds, fridge, shower, tv, wardrobe, elevator, hospital)
+      if (e.code === 'KeyF' && !e.repeat) {
+        const previousInterior = store.currentInterior;
         buildingInteriors.triggerActiveAction(this.player.position);
+        const currentInterior = useGameStore.getState().currentInterior;
+        if (currentInterior !== previousInterior) {
+          this.player.velocity.set(0, 0, 0);
+          this.player.isGrounded = true;
+          this.player.currentGroundElevation = currentInterior === 'supermarket' ? 300 : 0;
+        }
       }
 
       // Smartphone on 'KeyP' or 'ArrowUp'
@@ -869,6 +904,13 @@ export class Game {
       return;
     }
 
+    if (store.supermarketOpen) {
+      this.environmentSystem.update(store.timeOfDay, store.weather, this.player.position, dt);
+      this.updateStreetLights(store.timeOfDay < 5.5 || store.timeOfDay > 19.5 || store.weather === 'night');
+      this.cameraController.update(this.player.position, null, this.player.heading, 0, dt);
+      return;
+    }
+
     // 0B. Check if Player Health drops to 0
     if (store.health <= 0) {
       store.triggerWasted();
@@ -905,16 +947,20 @@ export class Game {
       this.cameraController.update(this.player.position, null, 0, 0, dt);
       this.environmentSystem.update(store.timeOfDay, store.weather, this.player.position, dt);
       this.updateStreetLights(store.timeOfDay < 5.5 || store.timeOfDay > 19.5 || store.weather === 'night');
+      this.worldChunkStreamer.update(
+        this.player.position,
+        store.timeOfDay < 5.5 || store.timeOfDay > 19.5 || store.weather === 'night'
+      );
       return;
     }
 
     // 2. Playing Mode - Read Keyboard & Touch Inputs
-    const isForward = this.keys['KeyW'] || this.keys['ArrowUp'] || this.touchInput.forward > 0;
-    const isBackward = this.keys['KeyS'] || this.keys['ArrowDown'] || this.touchInput.forward < 0;
-    const isLeft = this.keys['KeyA'] || this.keys['ArrowLeft'] || this.touchInput.strafe < 0;
-    const isRight = this.keys['KeyD'] || this.keys['ArrowRight'] || this.touchInput.strafe > 0;
-    const isSprint = this.keys['ShiftLeft'] || this.keys['ShiftRight'] || this.touchInput.sprint;
-    const isJump = this.keys['Space'] || this.touchInput.jump;
+    const isForward = !store.isInventoryOpen && (this.keys['KeyW'] || this.keys['ArrowUp'] || this.touchInput.forward > 0);
+    const isBackward = !store.isInventoryOpen && (this.keys['KeyS'] || this.keys['ArrowDown'] || this.touchInput.forward < 0);
+    const isLeft = !store.isInventoryOpen && (this.keys['KeyA'] || this.keys['ArrowLeft'] || this.touchInput.strafe < 0);
+    const isRight = !store.isInventoryOpen && (this.keys['KeyD'] || this.keys['ArrowRight'] || this.touchInput.strafe > 0);
+    const isSprint = !store.isInventoryOpen && (this.keys['ShiftLeft'] || this.keys['ShiftRight'] || this.touchInput.sprint);
+    const isJump = !store.isInventoryOpen && (this.keys['Space'] || this.touchInput.jump);
     const isHandbrake = (this.currentVehicle && this.keys['Space']) || this.touchInput.handbrake;
 
     // 3. Update Player, Vehicle, Plane, Train, or Helicopter
@@ -1094,6 +1140,26 @@ export class Game {
       );
     }
 
+    const isOnFoot =
+      !store.isInVehicle &&
+      !transitSystem.isPlayerFlyingPlane &&
+      !transitSystem.isPlayerRidingTrain &&
+      !transitSystem.isPlayerFlyingHeli &&
+      !store.isWasted;
+    const firstPersonOnFoot = isOnFoot && store.cameraViewMode === 'first_person';
+    const firstPersonDriving =
+      store.isInVehicle &&
+      !!this.currentVehicle &&
+      store.cameraViewMode === 'first_person';
+    this.firstPersonViewmodelRoot.position.copy(this.cameraController.camera.position);
+    this.firstPersonViewmodelRoot.quaternion.copy(this.cameraController.camera.quaternion);
+    if (isOnFoot) {
+      this.player.group.visible = !firstPersonOnFoot;
+    }
+    this.player.rig.firstPersonArms.visible = firstPersonOnFoot || firstPersonDriving;
+    this.player.rig.setFirstPersonDriving(firstPersonDriving);
+    this.player.rig.updateWatch(store.timeOfDay);
+
     // 5. Update AI Systems
     const nonTrafficVehicles = [
       ...this.vehicles,
@@ -1131,8 +1197,16 @@ export class Game {
     this.updateJobsSystem(dt);
 
     // 8. Update Environment
-    this.environmentSystem.update(store.timeOfDay, store.weather, this.player.position, dt);
-    this.updateStreetLights(store.timeOfDay < 5.5 || store.timeOfDay > 19.5 || store.weather === 'night');
+    this.worldTimeAccumulator += dt;
+    if (this.worldTimeAccumulator >= 1) {
+      store.setTimeOfDay((store.timeOfDay + this.worldTimeAccumulator / 60) % 24);
+      this.worldTimeAccumulator %= 1;
+    }
+    const timeOfDay = useGameStore.getState().timeOfDay;
+    const isNight = timeOfDay < 5.5 || timeOfDay > 19.5 || store.weather === 'night';
+    this.environmentSystem.update(timeOfDay, store.weather, this.player.position, dt);
+    this.updateStreetLights(isNight);
+    this.worldChunkStreamer.update(this.player.position, isNight);
 
     // 9. Interactive Location Triggers (Pay 'n' Spray, Dealership, Fast Food, Gas Station, Safehouse)
     this.checkInteractiveZones();

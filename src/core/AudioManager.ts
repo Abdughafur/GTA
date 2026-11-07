@@ -299,6 +299,32 @@ class SoundEngine {
     } catch {}
   }
 
+  public playWaterSplash() {
+    this.resumeContext();
+    if (!this.ctx || !this.sfxGain || this.isMuted) return;
+    try {
+      const now = this.ctx.currentTime;
+      const noiseBuffer = this.ctx.createBuffer(1, Math.floor(this.ctx.sampleRate * 0.12), this.ctx.sampleRate);
+      const samples = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < samples.length; i++) {
+        samples[i] = (Math.random() * 2 - 1) * (1 - i / samples.length);
+      }
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = noiseBuffer;
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(900, now);
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.08, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.sfxGain);
+      noise.start(now);
+      noise.stop(now + 0.12);
+    } catch {}
+  }
+
   // --- CAR DOOR / ENTER ---
   public playDoorSlam() {
     this.resumeContext();

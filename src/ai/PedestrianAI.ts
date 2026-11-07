@@ -1,12 +1,99 @@
 import * as THREE from 'three';
 import { CharacterRig, modelFactory } from '../world/ModelFactory';
-import { CollisionBox } from '../world/CityGenerator';
+import { CollisionBox, getDistrictName } from '../world/CityGenerator';
 import { audioManager } from '../core/AudioManager';
 import { CITY_ROAD_COORDS } from '../world/CityGenerator';
+import { useGameStore } from '../core/gameState';
 
 interface WalkNode {
   position: THREE.Vector3;
   neighbors: number[];
+}
+
+export interface CitizenProfile {
+  name: string;
+  age: number;
+  gender: 'man' | 'woman' | 'boy' | 'girl' | 'older man' | 'older woman';
+  ethnicity: string;
+  job: string;
+  personality: 'calm' | 'social' | 'hurried' | 'cautious' | 'bold';
+  homeDistrict: string;
+  workHours: [number, number];
+  height: number;
+  build: number;
+  skinTone: number;
+  jacketColor: number;
+  pantsColor: number;
+  shoesColor: number;
+  hairColor: number;
+  hairStyle: number;
+  glasses: boolean;
+  hat: boolean;
+  watch: boolean;
+  facialHair: boolean;
+}
+
+const FIRST_NAMES = [
+  'Amina', 'Arman', 'Aziz', 'Caleb', 'Daria', 'Elias', 'Farah', 'Hana',
+  'Idris', 'Jamal', 'Kira', 'Layla', 'Malik', 'Mira', 'Nadia', 'Omar',
+  'Rafi', 'Samira', 'Tariq', 'Uma', 'Victor', 'Yasmin', 'Zara', 'Zayn'
+];
+const LAST_NAMES = [
+  'Adler', 'Bennett', 'Costa', 'Diaz', 'Farouk', 'Grant', 'Haddad', 'Ivanov',
+  'Jones', 'Khan', 'Lopez', 'Mercer', 'Nakamura', 'Okafor', 'Patel', 'Reed',
+  'Santos', 'Turner', 'Usman', 'Vega'
+];
+const CITIZEN_JOBS = [
+  'shopkeeper', 'student', 'nurse', 'mechanic', 'cook', 'courier',
+  'teacher', 'artist', 'security guard', 'office worker', 'fisher', 'driver'
+];
+const ETHNICITIES = ['Bay local', 'Central Asian', 'East African', 'Mediterranean', 'South Asian', 'East Asian', 'Latino', 'Northern European'];
+const PERSONALITIES: CitizenProfile['personality'][] = ['calm', 'social', 'hurried', 'cautious', 'bold'];
+const SKIN_TONES = [
+  0xffe0bd, 0xf3c89d, 0xdca879, 0xc98d62, 0xa96f4d, 0x85563f,
+  0x684431, 0x4c3025, 0x38231d, 0xf0c7ae, 0xb98069, 0x916a58
+];
+const CLOTHING_COLORS = [
+  0x1d4ed8, 0x047857, 0xb91c1c, 0x6d28d9, 0x0369a1, 0x475569,
+  0xbe185d, 0x78716c, 0xc2410c, 0x365314, 0x0f766e, 0x334155
+];
+const HAIR_COLORS = [0x171717, 0x3f2a1d, 0x724b2a, 0xa16207, 0x8b4513, 0xb45309, 0x9ca3af, 0x6b7280];
+
+function createCitizenProfile(index: number, position: THREE.Vector3, jacketColor: number): CitizenProfile {
+  const ageGroup = index % 6;
+  const genders: CitizenProfile['gender'][] = ['man', 'woman', 'boy', 'girl', 'older man', 'older woman'];
+  const gender = genders[ageGroup];
+  const age = ageGroup < 2 ? 19 + (index * 7) % 46 : ageGroup < 4 ? 7 + (index * 3) % 10 : 65 + (index * 5) % 25;
+  const firstName = FIRST_NAMES[index % FIRST_NAMES.length];
+  const lastName = LAST_NAMES[Math.floor(index / FIRST_NAMES.length) % LAST_NAMES.length];
+  const adult = age >= 18;
+  const older = age >= 65;
+  const build = 0.78 + ((index * 7) % 11) * 0.055;
+  const height = age < 13 ? 0.68 + ((index * 3) % 6) * 0.045 : older ? 0.88 + ((index * 5) % 5) * 0.025 : 0.92 + ((index * 11) % 9) * 0.025;
+  const hair = new THREE.Color(HAIR_COLORS[(index * 3) % HAIR_COLORS.length]).getHex();
+
+  return {
+    name: `${firstName} ${lastName}`,
+    age,
+    gender,
+    ethnicity: ETHNICITIES[(index * 5) % ETHNICITIES.length],
+    job: age < 18 ? 'student' : CITIZEN_JOBS[(index * 5) % CITIZEN_JOBS.length],
+    personality: PERSONALITIES[(index * 3) % PERSONALITIES.length],
+    homeDistrict: getDistrictName(position.x, position.z),
+    workHours: [7 + (index % 3), 15 + (index % 5)],
+    height,
+    build,
+    skinTone: SKIN_TONES[(index * 5) % SKIN_TONES.length],
+    jacketColor: age < 18 ? CLOTHING_COLORS[(index * 7) % CLOTHING_COLORS.length] : jacketColor,
+    pantsColor: CLOTHING_COLORS[(index * 7 + 4) % CLOTHING_COLORS.length],
+    shoesColor: CLOTHING_COLORS[(index * 5 + 2) % CLOTHING_COLORS.length],
+    hairColor: older ? 0x9ca3af : hair,
+    hairStyle: (index * 7) % 6,
+    glasses: index % 5 === 0,
+    hat: index % 7 === 0,
+    watch: index % 3 !== 0,
+    facialHair: adult && gender === 'man' && index % 4 === 0
+  };
 }
 
 function createSidewalkNetwork(colliders: CollisionBox[]): WalkNode[] {
@@ -94,6 +181,7 @@ export class PedestrianAI {
   public isFleeing = false;
   public health = 50;
   public isDead = false;
+  public readonly profile: CitizenProfile;
   private walkSpeed: number;
   private fleeSpeed: number;
   private routeGraph: WalkNode[];
@@ -102,21 +190,31 @@ export class PedestrianAI {
   private routePause = 0;
   private isElderly: boolean;
 
-  constructor(startPos: THREE.Vector3, outfitColor: number, routeGraph: WalkNode[]) {
-    this.isElderly = Math.random() < 0.12;
+  constructor(startPos: THREE.Vector3, outfitColor: number, routeGraph: WalkNode[], profileIndex = 0) {
+    this.profile = createCitizenProfile(profileIndex, startPos, outfitColor);
+    this.isElderly = this.profile.age >= 65;
     this.walkSpeed = this.isElderly ? 1.25 : 2.2;
     this.fleeSpeed = this.isElderly ? 3.4 : 6.8;
     this.routeGraph = routeGraph;
-    const bodyShape = Math.random() < 0.5 ? 'feminine' : 'masculine';
-    const skinTones = [0xf6d8ae, 0xd7a47c, 0x986b50, 0x6b4634];
+    const bodyShape = this.profile.gender === 'woman' || this.profile.gender === 'girl' || this.profile.gender === 'older woman'
+      ? 'feminine'
+      : 'masculine';
     this.rig = modelFactory.createCharacter(
-      outfitColor,
-      skinTones[Math.floor(Math.random() * skinTones.length)],
+      this.profile.jacketColor,
+      this.profile.skinTone,
       {
         bodyShape,
         isElderly: this.isElderly,
-        glasses: Math.random() < 0.18,
-        hat: Math.random() < 0.12
+        pantsColor: this.profile.pantsColor,
+        shoesColor: this.profile.shoesColor,
+        hairColor: this.profile.hairColor,
+        hairStyle: this.profile.hairStyle,
+        glasses: this.profile.glasses,
+        hat: this.profile.hat,
+        watch: this.profile.watch,
+        height: this.profile.height,
+        build: this.profile.build,
+        facialHair: this.profile.facialHair
       }
     );
     if (this.isElderly) this.addWalkingCane();
@@ -217,7 +315,7 @@ export class PedestrianAI {
     const distToPlayer = this.position.distanceTo(playerPos);
 
     // Flee if player is speeding close by (< 14m)
-    if (distToPlayer < 14 && playerSpeed > 8) {
+    if (distToPlayer < 14 && playerSpeed > 8 && (this.profile.personality !== 'bold' || distToPlayer < 6)) {
       this.isFleeing = true;
       const awayVec = new THREE.Vector3().subVectors(this.position, playerPos).normalize();
       this.heading = Math.atan2(awayVec.x, awayVec.z);
@@ -238,7 +336,11 @@ export class PedestrianAI {
             target = this.route[++this.routeIndex];
           } else {
             this.route = [];
-            this.routePause = 1.0 + Math.random() * 2;
+            this.routePause = this.profile.personality === 'hurried'
+              ? 0.3 + Math.random() * 0.7
+              : this.profile.personality === 'social'
+                ? 2 + Math.random() * 3
+                : 1 + Math.random() * 2;
           }
         }
 
@@ -251,7 +353,10 @@ export class PedestrianAI {
 
     this.group.rotation.y = this.heading;
 
-    const currentSpeed = this.isFleeing ? this.fleeSpeed : this.route.length > 0 ? this.walkSpeed : 0;
+    const timeOfDay = useGameStore.getState().timeOfDay;
+    const isWorkTime = timeOfDay >= this.profile.workHours[0] && timeOfDay < this.profile.workHours[1];
+    const scheduleFactor = isWorkTime && this.profile.personality === 'hurried' ? 1.15 : 1;
+    const currentSpeed = this.isFleeing ? this.fleeSpeed : this.route.length > 0 ? this.walkSpeed * scheduleFactor : 0;
     this.velocity.x = Math.sin(this.heading) * currentSpeed;
     this.velocity.z = Math.cos(this.heading) * currentSpeed;
 
@@ -277,7 +382,10 @@ export class PedestrianAI {
     this.position.y = 0;
 
     // Procedural animation
-    this.rig.animate(currentSpeed / 2.5, false, false, dt);
+    this.rig.animate(currentSpeed / 2.5, false, false, dt, {
+      running: this.isFleeing,
+      fatigue: this.profile.personality === 'hurried' ? 0.25 : 0
+    });
   }
 }
 
@@ -316,7 +424,7 @@ export class PedestrianManager {
       basePos.x += (Math.random() - 0.5) * 16;
       basePos.z += (Math.random() - 0.5) * 16;
 
-      const ped = new PedestrianAI(basePos, outfitColors[i % outfitColors.length], this.routeGraph);
+      const ped = new PedestrianAI(basePos, outfitColors[i % outfitColors.length], this.routeGraph, i);
       this.pedestrians.push(ped);
       this.scene.add(ped.group);
     }

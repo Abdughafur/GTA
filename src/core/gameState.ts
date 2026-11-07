@@ -18,7 +18,27 @@ export type PhoneAppType =
   | 'settings';
 
 export type JobType = 'none' | 'taxi' | 'delivery' | 'paramedic' | 'mechanic';
-export type InteriorType = 'outdoor' | 'apartment' | 'hospital' | 'mall' | 'garage' | 'bank';
+export type InteriorType = 'outdoor' | 'apartment' | 'hospital' | 'mall' | 'garage' | 'bank' | 'supermarket';
+export type SupermarketProductId = 'apple' | 'bread' | 'milk' | 'water' | 'soda' | 'sandwich';
+export type SupermarketPaymentMethod = 'cash' | 'card';
+
+export const SUPERMARKET_PRODUCTS: {
+  id: SupermarketProductId;
+  name: string;
+  description: string;
+  price: number;
+  hunger: number;
+  thirst: number;
+  health: number;
+  color: number;
+}[] = [
+  { id: 'apple', name: 'Fresh apple', description: 'Crisp local fruit', price: 3, hunger: 10, thirst: 2, health: 0, color: 0xdc2626 },
+  { id: 'bread', name: 'Bakery bread', description: 'Warm wholegrain loaf', price: 5, hunger: 18, thirst: 0, health: 0, color: 0xc0843d },
+  { id: 'milk', name: 'Fresh milk', description: 'One-litre bottle', price: 4, hunger: 5, thirst: 16, health: 0, color: 0xf1f5f9 },
+  { id: 'water', name: 'Spring water', description: 'Cold mineral water', price: 2, hunger: 0, thirst: 25, health: 0, color: 0x38bdf8 },
+  { id: 'soda', name: 'Bay Cola', description: 'Chilled soft drink', price: 3, hunger: 2, thirst: 14, health: 0, color: 0x7f1d1d },
+  { id: 'sandwich', name: 'Deli sandwich', description: 'Made fresh at the counter', price: 8, hunger: 30, thirst: 0, health: 4, color: 0x84a34d }
+];
 export type WeaponType = 'fists' | 'knife' | 'pistol' | 'smg' | 'rifle';
 export type CameraViewMode = 'third_chase' | 'third_close' | 'first_person';
 
@@ -91,6 +111,14 @@ export interface CharacterAppearance {
   watch: boolean;
 }
 
+export interface PlayerBelongings {
+  identityNumber: string;
+  phoneModels: string[];
+  activePhoneModel: string;
+  keys: string[];
+  carriedItems: string[];
+}
+
 export interface JobPassenger {
   name: string;
   pickupPos: [number, number, number];
@@ -113,6 +141,15 @@ export interface GameState {
   maxHealth: number;
   armor: number;
   cash: number;
+  supermarketOpen: boolean;
+  hasShoppingBasket: boolean;
+  supermarketCart: Partial<Record<SupermarketProductId, number>>;
+  openSupermarket: () => void;
+  closeSupermarket: () => void;
+  takeShoppingBasket: () => void;
+  addSupermarketProduct: (productId: SupermarketProductId) => void;
+  removeSupermarketProduct: (productId: SupermarketProductId) => void;
+  checkoutSupermarket: (method: SupermarketPaymentMethod) => boolean;
   reputation: number;
   drivingSkill: number;
   ownedProperties: string[];
@@ -131,7 +168,7 @@ export interface GameState {
   damagePlayer: (amount: number) => void;
   healPlayer: (amount: number) => void;
   addCash: (amount: number) => void;
-  spendCash: (amount: number) => boolean;
+  spendCash: (amount: number, description?: string) => boolean;
   sleep: (hours?: number) => void;
   eatFood: (amount?: number) => void;
   drinkBeverage: (amount?: number) => void;
@@ -141,6 +178,10 @@ export interface GameState {
   // Character Customization
   appearance: CharacterAppearance;
   setAppearance: (updates: Partial<CharacterAppearance>) => void;
+  belongings: PlayerBelongings;
+  isInventoryOpen: boolean;
+  toggleInventory: () => void;
+  setInventoryOpen: (open: boolean) => void;
   isWardrobeOpen: boolean;
   setWardrobeOpen: (open: boolean) => void;
 
@@ -338,6 +379,63 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
   maxHealth: 100,
   armor: 50,
   cash: 2500,
+  supermarketOpen: false,
+  hasShoppingBasket: false,
+  supermarketCart: {},
+  openSupermarket: () => set({ supermarketOpen: true }),
+  closeSupermarket: () => set({ supermarketOpen: false }),
+  takeShoppingBasket: () => {
+    set({ hasShoppingBasket: true });
+    get().showNotification('Shopping basket ready. Browse the aisles and add products with [F].');
+  },
+  addSupermarketProduct: (productId) => {
+    if (!get().hasShoppingBasket) {
+      get().showNotification('Take a shopping basket before choosing products.');
+      return;
+    }
+    set((state) => ({
+      supermarketCart: {
+        ...state.supermarketCart,
+        [productId]: (state.supermarketCart[productId] ?? 0) + 1
+      }
+    }));
+    const product = SUPERMARKET_PRODUCTS.find((item) => item.id === productId);
+    if (product) get().showNotification(`${product.name} added to your basket.`);
+  },
+  removeSupermarketProduct: (productId) => set((state) => {
+    const quantity = state.supermarketCart[productId] ?? 0;
+    if (quantity <= 1) {
+      const { [productId]: _removed, ...supermarketCart } = state.supermarketCart;
+      return { supermarketCart };
+    }
+    return { supermarketCart: { ...state.supermarketCart, [productId]: quantity - 1 } };
+  }),
+  checkoutSupermarket: (method) => {
+    const cart = get().supermarketCart;
+    const total = SUPERMARKET_PRODUCTS.reduce(
+      (sum, product) => sum + product.price * (cart[product.id] ?? 0),
+      0
+    );
+    if (total <= 0) {
+      get().showNotification('Your basket is empty.');
+      return false;
+    }
+    const paymentLabel = method === 'card' ? 'Supermarket card payment' : 'Supermarket cash purchase';
+    if (!get().spendCash(total, paymentLabel)) {
+      get().showNotification(`Not enough funds. Your grocery total is $${total}.`);
+      return false;
+    }
+    for (const product of SUPERMARKET_PRODUCTS) {
+      const quantity = cart[product.id] ?? 0;
+      if (quantity === 0) continue;
+      if (product.hunger > 0) get().eatFood(product.hunger * quantity);
+      if (product.thirst > 0) get().drinkBeverage(product.thirst * quantity);
+      if (product.health > 0) get().healPlayer(product.health * quantity);
+    }
+    set({ supermarketCart: {}, hasShoppingBasket: false, supermarketOpen: false });
+    get().showNotification(`Groceries paid for by ${method}. Total: $${total}.`);
+    return true;
+  },
   reputation: 0,
   drivingSkill: 0,
   ownedProperties: [],
@@ -396,12 +494,12 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
       };
       return { cash: newCash, transactions: [newTx, ...s.transactions] };
     }),
-  spendCash: (amount) => {
+  spendCash: (amount, description = 'Payment / Purchase') => {
     const { cash, transactions } = get();
     if (cash >= amount) {
       const newTx: BankTransaction = {
         id: Math.random().toString(36).substring(2, 9),
-        description: 'Payment / Purchase',
+        description,
         amount: -amount,
         type: 'debit',
         date: 'Just now'
@@ -488,6 +586,16 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
     set((s) => ({
       appearance: { ...s.appearance, ...updates }
     })),
+  belongings: {
+    identityNumber: 'VB-2048-0715',
+    phoneModels: ['AbduPhone 16 Pro', 'AbduPhone Mini', 'AbduPhone Classic'],
+    activePhoneModel: 'AbduPhone 16 Pro',
+    keys: ['Safehouse key', 'Vehicle key fob'],
+    carriedItems: ['Wallet', 'City ID', 'Smartphone', 'House keys', 'Vehicle keys']
+  },
+  isInventoryOpen: false,
+  toggleInventory: () => set((s) => ({ isInventoryOpen: !s.isInventoryOpen })),
+  setInventoryOpen: (isInventoryOpen) => set({ isInventoryOpen }),
   isWardrobeOpen: false,
   setWardrobeOpen: (isWardrobeOpen) => set({ isWardrobeOpen }),
 
@@ -1045,6 +1153,7 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
     hunger: state.hunger,
     thirst: state.thirst,
     appearance: state.appearance,
+    belongings: state.belongings,
     vehicleCustomization: state.vehicleCustomization,
     timeOfDay: state.timeOfDay,
     weather: state.weather,

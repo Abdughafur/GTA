@@ -31,6 +31,11 @@ export const Minimap: React.FC = () => {
     return { x: px, y: py };
   };
 
+  const nearbyRoads = (coordinate: number) => {
+    const nearestRoad = 60 + Math.round((coordinate - 60) / 100) * 100;
+    return [-2, -1, 0, 1, 2].map((offset) => nearestRoad + offset * 100);
+  };
+
   const wpRadar = customWaypoint ? toRadar(customWaypoint[0], customWaypoint[2]) : null;
   const missionRadar = activeMission ? toRadar(activeMission.targetPos[0], activeMission.targetPos[2]) : null;
 
@@ -38,14 +43,14 @@ export const Minimap: React.FC = () => {
     <div className="relative w-32 h-32 rounded-full border-2 border-slate-700 bg-slate-950/90 shadow-2xl shadow-black overflow-hidden select-none">
       <svg viewBox="0 0 128 128" className="w-full h-full">
         {/* Ocean boundary if close */}
-        {playerPos[2] > 140 && (
+        {playerPos[2] > 350 && playerPos[2] < 550 && Math.abs(playerPos[0]) < 450 && (
           <rect x="-50" y="90" width="220" height="60" fill="#0284c7" opacity="0.4" />
         )}
 
         {/* Road Grid Lines rotated with player camera */}
-        {[-140, -40, 60, 160].map((rz) => {
-          const p1 = toRadar(-200, rz);
-          const p2 = toRadar(200, rz);
+        {nearbyRoads(playerPos[2]).map((rz) => {
+          const p1 = toRadar(playerPos[0] - 200, rz);
+          const p2 = toRadar(playerPos[0] + 200, rz);
           return (
             <line
               key={`rz_${rz}`}
@@ -60,9 +65,9 @@ export const Minimap: React.FC = () => {
           );
         })}
 
-        {[-160, -60, 40, 140].map((rx) => {
-          const p1 = toRadar(rx, -180);
-          const p2 = toRadar(rx, 200);
+        {nearbyRoads(playerPos[0]).map((rx) => {
+          const p1 = toRadar(rx, playerPos[2] - 200);
+          const p2 = toRadar(rx, playerPos[2] + 200);
           return (
             <line
               key={`rx_${rx}`}
