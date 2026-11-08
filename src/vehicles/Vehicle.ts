@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { modelFactory } from '../world/ModelFactory';
-import { CollisionBox } from '../world/CityGenerator';
+import { CollisionBox, getTerrainGrip, getTerrainHeight, WORLD_RADIUS } from '../world/CityGenerator';
 import { audioManager } from '../core/AudioManager';
 import { getVehicleRules } from './models';
 import { VehicleConfig, VehicleMeshRig, VehicleRules } from './types';
@@ -72,6 +72,7 @@ export class Vehicle {
     this.heading = startHeading;
     this.previousHeading = startHeading;
     this.previousPosition = startPos.clone();
+    this.group.rotation.order = 'YXZ';
     this.group.rotation.y = this.heading;
     this.health = config.healthMax;
     this.tireTemperatures = this.rig.wheels.map(() => 24);
@@ -125,7 +126,7 @@ export class Vehicle {
 
     // 1. Steering with speed sensitivity
     const speedRatio = Math.min(1, Math.abs(this.speed) / this.config.maxSpeed);
-    const tireGrip = this.getTireGrip();
+    const tireGrip = this.getTireGrip() * getTerrainGrip(this.position.x, this.position.z);
     const steerFactor = 1.0 - speedRatio * (1 - this.rules.highSpeedSteering);
     const tireCondition = this.tireHealth.reduce((sum, health) => sum + health, 0) /
       Math.max(1, this.tireHealth.length) / 100;
@@ -206,8 +207,8 @@ export class Vehicle {
     // 4. Update velocity and position
     const forwardVec = new THREE.Vector3(Math.sin(this.heading), 0, Math.cos(this.heading));
     this.velocity.copy(forwardVec).multiplyScalar(this.speed);
-    const nextX = this.position.x + this.velocity.x * dt;
-    const nextZ = this.position.z + this.velocity.z * dt;
+    const nextX = THREE.MathUtils.clamp(this.position.x + this.velocity.x * dt, -WORLD_RADIUS + 8, WORLD_RADIUS - 8);
+    const nextZ = THREE.MathUtils.clamp(this.position.z + this.velocity.z * dt, -WORLD_RADIUS + 8, WORLD_RADIUS - 8);
 
     // Collision check against city buildings & obstacles
     const carRadius = this.rules.collisionRadius;
@@ -272,8 +273,17 @@ export class Vehicle {
       this.position.z = nextZ;
     }
 
-    // Ground level clamp
-    this.position.y = 0;
+    this.position.y = getTerrainHeight(this.position.x, this.position.z);
+    const forwardX = Math.sin(this.heading);
+    const forwardZ = Math.cos(this.heading);
+    const rightX = Math.cos(this.heading);
+    const rightZ = -Math.sin(this.heading);
+    const groundAhead = getTerrainHeight(this.position.x + forwardX * 2, this.position.z + forwardZ * 2);
+    const groundBehind = getTerrainHeight(this.position.x - forwardX * 2, this.position.z - forwardZ * 2);
+    const groundLeft = getTerrainHeight(this.position.x - rightX * 2, this.position.z - rightZ * 2);
+    const groundRight = getTerrainHeight(this.position.x + rightX * 2, this.position.z + rightZ * 2);
+    this.group.rotation.x = Math.atan2(groundAhead - groundBehind, 4);
+    this.group.rotation.z = Math.atan2(groundLeft - groundRight, 4);
 
     // 5. Per-wheel suspension, tire temperature/wear and independent wheel spin.
     this.wheelSpinAngle += (this.speed / this.rules.wheelRadius) * dt;

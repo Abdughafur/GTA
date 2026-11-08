@@ -3,6 +3,50 @@ import { textureFactory } from './TextureGenerator';
 import { modelFactory } from './ModelFactory';
 
 export const CITY_ROAD_COORDS = [-340, -240, -140, -40, 60, 160, 260] as const;
+export const WORLD_RADIUS = 50000;
+
+function smoothstep(edge0: number, edge1: number, value: number): number {
+  const t = THREE.MathUtils.clamp((value - edge0) / (edge1 - edge0), 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
+function terrainNoise(x: number, z: number, scale: number): number {
+  const gx = x / scale;
+  const gz = z / scale;
+  const x0 = Math.floor(gx);
+  const z0 = Math.floor(gz);
+  const tx = gx - x0;
+  const tz = gz - z0;
+  const fadeX = tx * tx * (3 - 2 * tx);
+  const fadeZ = tz * tz * (3 - 2 * tz);
+  const hash = (ix: number, iz: number) => {
+    const value = Math.sin(ix * 127.1 + iz * 311.7) * 43758.5453;
+    return (value - Math.floor(value)) * 2 - 1;
+  };
+  const north = THREE.MathUtils.lerp(hash(x0, z0), hash(x0 + 1, z0), fadeX);
+  const south = THREE.MathUtils.lerp(hash(x0, z0 + 1), hash(x0 + 1, z0 + 1), fadeX);
+  return THREE.MathUtils.lerp(north, south, fadeZ);
+}
+
+export function getTerrainHeight(x: number, z: number): number {
+  const distanceFromCity = Math.hypot(x, z);
+  const blend = smoothstep(3200, 6200, distanceFromCity);
+  if (blend === 0) return 0;
+
+  const broadHills = terrainNoise(x, z, 5200) * 54;
+  const rollingHills = terrainNoise(x, z, 1900) * 24;
+  const foothills = terrainNoise(x, z, 720) * 7;
+  return Math.max(-18, (38 + broadHills + rollingHills + foothills) * blend);
+}
+
+export function getTerrainGrip(x: number, z: number): number {
+  if (Math.max(Math.abs(x), Math.abs(z)) <= 3500) return 1;
+  const distanceToRuralRoad = (coordinate: number) => {
+    const nearestRoad = Math.round((coordinate - 60) / 400) * 400 + 60;
+    return Math.abs(coordinate - nearestRoad);
+  };
+  return Math.min(distanceToRuralRoad(x), distanceToRuralRoad(z)) <= 7 ? 0.78 : 0.58;
+}
 
 export interface CollisionBox {
   minX: number;
@@ -26,7 +70,34 @@ export interface TrafficSignalData {
   group: THREE.Group;
 }
 
+export function isWaterArea(x: number, z: number): boolean {
+  return Math.abs(x) <= 550 && z >= 360 && z <= 540;
+}
+
+export function isInSwimmableWater(x: number, z: number): boolean {
+  const onBridge = x >= 148 && x <= 172 && z >= 340 && z <= 560;
+  return isWaterArea(x, z) && !onBridge;
+}
+
 export function getDistrictName(x: number, z: number): string {
+  if (Math.max(Math.abs(x), Math.abs(z)) > 3000) {
+    const villageX = Math.round(x / 7000) * 7000;
+    const villageZ = Math.round(z / 7000) * 7000;
+    const villageDistance = Math.hypot(x - villageX, z - villageZ);
+    if (villageDistance < 1150 && Math.max(Math.abs(villageX), Math.abs(villageZ)) > 3500) {
+      const villages = [
+        'Pinebrook Village', 'Meadowfield Village', 'Stonebridge Village',
+        'Willow Creek Village', 'Redstone Village', 'Cedar Hollow Village',
+        'Riverside Village', 'Oakridge Village'
+      ];
+      const index = Math.abs(Math.round(villageX / 7000) * 7 + Math.round(villageZ / 7000) * 11) % villages.length;
+      return villages[index];
+    }
+    if (z < -3000) return 'Northwood Outskirts';
+    if (z > 3000) return 'South Coast Countryside';
+    if (x < -3000) return 'Westfield Rural District';
+    return 'East Ridge Countryside';
+  }
   if (x > 700 && z < -400) return 'Vice Bay Air Force Base';
   if (Math.abs(x) > 700 && z < -700) return x < -1050 ? 'Vice Bay Stadium District' : 'Vice Bay University';
   if (z < -900 && Math.abs(x) <= 700) return 'Kingsgate Castle & Old Fort';
@@ -82,14 +153,22 @@ export class CityGenerator {
     const trafficSignals: TrafficSignalData[] = [];
 
     // City Ground Plane (Asphalt / Sidewalk / Grass)
-    const groundGeo = new THREE.PlaneGeometry(3000, 3000, 64, 64);
+    const groundGeo = new THREE.PlaneGeometry(WORLD_RADIUS * 2, WORLD_RADIUS * 2, 512, 512);
+    const groundPositions = groundGeo.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < groundPositions.count; i++) {
+      const worldX = groundPositions.getX(i);
+      const worldZ = -groundPositions.getY(i);
+      groundPositions.setZ(i, getTerrainHeight(worldX, worldZ));
+    }
+    groundPositions.needsUpdate = true;
+    groundGeo.computeVertexNormals();
     const grassTexture = textureFactory.getGrassTexture();
-    grassTexture.repeat.set(70, 70);
+    grassTexture.repeat.set(2500, 2500);
     const groundMat = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
+      color: 0xd7d8bd,
       map: grassTexture,
       roughness: 0.85,
-      metalness: 0.02
+      metalness: 0
     });
     const ground = new THREE.Mesh(groundGeo, groundMat);
     ground.rotation.x = -Math.PI / 2;
@@ -105,6 +184,39 @@ export class CityGenerator {
     beach.position.set(0, -0.12, 315);
     beach.receiveShadow = true;
     cityGroup.add(beach);
+
+    const umbrellaColors = [0xef4444, 0x2563eb, 0xfacc15, 0x16a34a];
+    for (let i = 0; i < 12; i++) {
+      const umbrella = new THREE.Group();
+      const pole = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.08, 0.1, 3.2, 8),
+        new THREE.MeshStandardMaterial({ color: 0x8b7355, roughness: 0.85 })
+      );
+      pole.position.y = 1.6;
+      const canopy = new THREE.Mesh(
+        new THREE.ConeGeometry(2.5, 1.1, 12),
+        new THREE.MeshStandardMaterial({ color: umbrellaColors[i % umbrellaColors.length], roughness: 0.7 })
+      );
+      canopy.position.y = 3.45;
+      canopy.rotation.x = Math.PI;
+      const chair = new THREE.Mesh(
+        new THREE.BoxGeometry(1.4, 0.18, 2.2),
+        new THREE.MeshStandardMaterial({ color: i % 2 ? 0xf1f5f9 : 0xfde68a, roughness: 0.9 })
+      );
+      chair.position.set(3.2, 0.45, 0);
+      umbrella.add(pole, canopy, chair);
+      umbrella.position.set(-490 + i * 88, 0, 286 + (i % 3) * 24);
+      cityGroup.add(umbrella);
+    }
+
+    for (let i = 0; i < 6; i++) {
+      const ball = new THREE.Mesh(
+        new THREE.SphereGeometry(0.7, 12, 10),
+        new THREE.MeshStandardMaterial({ color: umbrellaColors[(i + 1) % umbrellaColors.length], roughness: 0.55 })
+      );
+      ball.position.set(-390 + i * 145, 0.7, 335 - (i % 2) * 18);
+      cityGroup.add(ball);
+    }
 
     const oceanGeo = new THREE.PlaneGeometry(1100, 180, 56, 20);
     const oceanMat = new THREE.MeshPhysicalMaterial({
@@ -123,7 +235,11 @@ export class CityGenerator {
       oceanGeo.attributes.position as THREE.BufferAttribute
     ).array.slice() as Float32Array;
 
-    colliders.push({ minX: -450, maxX: 450, minZ: 360, maxZ: 540, type: 'water' });
+    colliders.push(
+      { minX: -550, maxX: 148, minZ: 360, maxZ: 540, type: 'water' },
+      { minX: 172, maxX: 550, minZ: 360, maxZ: 540, type: 'water' }
+    );
+    this.addHarborBridge(cityGroup);
 
     // --- ROAD NETWORK GRID ---
     // Major Avenue X: Z = -140, Z = -40, Z = 60, Z = 160
@@ -1153,6 +1269,56 @@ export class CityGenerator {
       { minX: 390, maxX: 580, minZ: -260, maxZ: -30, type: 'building' },
       { minX: 390, maxX: 590, minZ: 30, maxZ: 270, type: 'building' }
     );
+  }
+
+  private addHarborBridge(cityGroup: THREE.Group) {
+    const bridge = new THREE.Group();
+    const deck = new THREE.Mesh(
+      new THREE.PlaneGeometry(20, 220),
+      new THREE.MeshStandardMaterial({
+        map: textureFactory.getRoadTexture(),
+        roughness: 0.65,
+        metalness: 0.08,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1
+      })
+    );
+    deck.rotation.x = -Math.PI / 2;
+    deck.position.set(160, 0.06, 450);
+    deck.receiveShadow = true;
+    bridge.add(deck);
+
+    const railMaterial = new THREE.MeshStandardMaterial({ color: 0x647078, metalness: 0.65, roughness: 0.4 });
+    for (const x of [149.6, 170.4]) {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.45, 1.15, 220), railMaterial);
+      rail.position.set(x, 0.65, 450);
+      bridge.add(rail);
+
+      for (let z = 350; z <= 550; z += 20) {
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.55, 1.4, 0.55), railMaterial);
+        post.position.set(x, 0.7, z);
+        bridge.add(post);
+      }
+    }
+
+    const centerLineMaterial = new THREE.MeshStandardMaterial({ color: 0xf2d27b, roughness: 0.72 });
+    for (let z = 360; z <= 540; z += 12) {
+      const dash = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.025, 4.4), centerLineMaterial);
+      dash.position.set(160, 0.09, z);
+      bridge.add(dash);
+    }
+
+    const pierMaterial = new THREE.MeshStandardMaterial({ color: 0x777e7e, roughness: 0.86 });
+    for (const z of [390, 450, 510]) {
+      for (const x of [155, 165]) {
+        const pier = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.4, 3), pierMaterial);
+        pier.position.set(x, -0.64, z);
+        bridge.add(pier);
+      }
+    }
+
+    cityGroup.add(bridge);
   }
 
   private createMountainGeometry(radius: number, height: number, seed: number): THREE.BufferGeometry {

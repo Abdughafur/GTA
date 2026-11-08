@@ -21,8 +21,8 @@ export class EnvironmentSystem {
 
     this.skyMaterial = new THREE.ShaderMaterial({
       uniforms: {
-        topColor: { value: new THREE.Color(0x43aee4) },
-        horizonColor: { value: new THREE.Color(0xf6d49b) }
+        topColor: { value: new THREE.Color(0x7197ad) },
+        horizonColor: { value: new THREE.Color(0xcbb99b) }
       },
       vertexShader: `
         varying vec3 skyDirection;
@@ -103,11 +103,11 @@ export class EnvironmentSystem {
     scene.add(this.dirLight);
 
     // 3. Cool Hemisphere fill light
-    this.hemiLight = new THREE.HemisphereLight(0x93c5fd, 0x1e293b, 1.0);
+    this.hemiLight = new THREE.HemisphereLight(0xc4d0d0, 0x55564a, 1.0);
     scene.add(this.hemiLight);
 
     // 4. Horizon Fog
-    scene.fog = new THREE.FogExp2(0xcfe3fa, 0.0018);
+    scene.fog = new THREE.FogExp2(0xc1c9bd, 0.00012);
 
     // 5. Rain Particle System
     this.initRain();
@@ -202,18 +202,18 @@ export class EnvironmentSystem {
       this.hemiLight.color.setHex(0x3b82f6);
       if (this.rainParticles) this.rainParticles.visible = false;
     } else if (isSunset) {
-      this.setSkyPalette(0x5577a2, 0xffb36b);
-      this.scene.background = new THREE.Color(0xf97316);
-      (this.scene.fog as THREE.FogExp2).color.setHex(0xfb923c);
+      this.setSkyPalette(0x536d83, 0xc98d68);
+      this.scene.background = new THREE.Color(0xc98d68);
+      (this.scene.fog as THREE.FogExp2).color.setHex(0xc98d68);
       this.dirLight.intensity = 2.0;
       this.dirLight.color.setHex(0xfbbf24);
       this.hemiLight.intensity = 0.9;
       if (this.rainParticles) this.rainParticles.visible = false;
     } else {
       // Sunny daytime
-      this.setSkyPalette(0x43aee4, 0xf6d49b);
-      this.scene.background = new THREE.Color(0x7dd3fc);
-      (this.scene.fog as THREE.FogExp2).color.setHex(0xbae6fd);
+      this.setSkyPalette(0x7197ad, 0xcbb99b);
+      this.scene.background = new THREE.Color(0xc1c9bd);
+      (this.scene.fog as THREE.FogExp2).color.setHex(0xc1c9bd);
       this.dirLight.intensity = 2.4;
       this.dirLight.color.setHex(0xfffaed);
       this.hemiLight.intensity = 1.0;

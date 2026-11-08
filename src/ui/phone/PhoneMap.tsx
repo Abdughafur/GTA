@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useGameStore } from '../../core/gameState';
 import { Navigation, MapPin, Building, Compass, Layers } from 'lucide-react';
 import { audioManager } from '../../core/AudioManager';
+import { WORLD_RADIUS } from '../../world/CityGenerator';
 
 export const PhoneMap: React.FC = () => {
   const [viewMode, setViewMode] = useState<'city' | 'blueprint'>('city');
@@ -14,16 +15,16 @@ export const PhoneMap: React.FC = () => {
   const distanceToObjective = useGameStore((s) => s.distanceToObjective);
   const currentFloor = useGameStore((s) => s.currentFloor);
 
-  // Map coordinate conversion: World (-1500..1500) to SVG viewbox (0..400)
+  // Map coordinate conversion: World (-50,000..50,000) to SVG viewbox (0..400)
   const worldToMap = (x: number, z: number) => {
-    const mapX = ((x + 1500) / 3000) * 400;
-    const mapY = ((z + 1500) / 3000) * 400;
+    const mapX = ((x + WORLD_RADIUS) / (WORLD_RADIUS * 2)) * 400;
+    const mapY = ((z + WORLD_RADIUS) / (WORLD_RADIUS * 2)) * 400;
     return { x: mapX, y: mapY };
   };
 
   const mapToWorld = (mapX: number, mapY: number): [number, number, number] => {
-    const x = Math.max(-1480, Math.min(1480, (mapX / 400) * 3000 - 1500));
-    const z = Math.max(-1480, Math.min(1480, (mapY / 400) * 3000 - 1500));
+    const x = Math.max(-WORLD_RADIUS + 20, Math.min(WORLD_RADIUS - 20, (mapX / 400) * (WORLD_RADIUS * 2) - WORLD_RADIUS));
+    const z = Math.max(-WORLD_RADIUS + 20, Math.min(WORLD_RADIUS - 20, (mapY / 400) * (WORLD_RADIUS * 2) - WORLD_RADIUS));
     return [Math.round(x), 0, Math.round(z)];
   };
 
@@ -82,12 +83,19 @@ export const PhoneMap: React.FC = () => {
         <div className="relative flex-1 bg-slate-900 overflow-hidden cursor-crosshair">
           <svg viewBox="0 0 400 400" className="w-full h-full" onClick={handleMapClick}>
             {/* Coastline and ocean */}
-            <rect x="140" y="248" width="120" height="24" fill="#0369a1" opacity="0.6" />
-            <text x="200" y="264" fill="#38bdf8" fontSize="3.5" textAnchor="middle" fontWeight="bold" opacity="0.8">
-              VICE BAY WATERWAY
+            <rect
+              x={worldToMap(-550, 360).x}
+              y={worldToMap(-550, 360).y}
+              width={worldToMap(550, 0).x - worldToMap(-550, 0).x}
+              height={worldToMap(0, 540).y - worldToMap(0, 360).y}
+              fill="#0369a1"
+              opacity="0.72"
+            />
+            <text x="200" y="207" fill="#38bdf8" fontSize="3" textAnchor="middle" fontWeight="bold" opacity="0.8">
+              VICE BAY
             </text>
 
-            {Array.from({ length: 30 }, (_, index) => -1440 + index * 100).map((road) => {
+            {Array.from({ length: 21 }, (_, index) => -WORLD_RADIUS + index * 5000).map((road) => {
               const vertical = worldToMap(road, 0).x;
               const horizontal = worldToMap(0, road).y;
               return (
@@ -99,7 +107,7 @@ export const PhoneMap: React.FC = () => {
             })}
 
             {/* Legacy downtown map art, scaled to its true place in the expanded world. */}
-            <g transform="translate(173.333 173.333) scale(0.133333)">
+            <g transform="translate(197.6 197.6) scale(0.008)">
               {/* Road Network Lines */}
               <line x1="30" y1="60" x2="370" y2="60" stroke="#334155" strokeWidth="18" strokeLinecap="round" />
               <line x1="30" y1="160" x2="370" y2="160" stroke="#334155" strokeWidth="18" strokeLinecap="round" />

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { useGameStore, CameraViewMode } from '../core/gameState';
+import { isInSwimmableWater } from '../world/CityGenerator';
 
 export type CameraMode = 'onFoot' | 'vehicle' | 'cinematic';
 
@@ -18,7 +19,7 @@ export class CameraController {
   private cinematicTimer = 0;
 
   constructor(fov = 65, aspect = 16 / 9) {
-    this.camera = new THREE.PerspectiveCamera(fov, aspect, 0.1, 4000);
+    this.camera = new THREE.PerspectiveCamera(fov, aspect, 0.1, 12000);
   }
 
   public update(
@@ -108,7 +109,7 @@ export class CameraController {
       // --- ON-FOOT CAMERA MODES ---
       if (viewMode === 'first_person') {
         // 1. FIRST-PERSON EYE VIEW
-        const isSwimming = playerPos.z >= 358 && playerPos.z <= 535 && Math.abs(playerPos.x) < 550;
+        const isSwimming = isInSwimmableWater(playerPos.x, playerPos.z);
         const eyePos = playerPos.clone().add(new THREE.Vector3(0, isSwimming ? 1.05 : 1.72, 0));
         this.camera.position.copy(eyePos);
 

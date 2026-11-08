@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CharacterRig, modelFactory } from '../world/ModelFactory';
-import { CollisionBox } from '../world/CityGenerator';
+import { CollisionBox, getTerrainHeight, isInSwimmableWater, WORLD_RADIUS } from '../world/CityGenerator';
 import { audioManager } from '../core/AudioManager';
 import { buildingInteriors } from '../world/BuildingInteriors';
 import { useGameStore, WeaponType } from '../core/gameState';
@@ -155,10 +155,7 @@ export class Player {
       return;
     }
 
-    this.isSwimming =
-      this.position.z >= 358 &&
-      this.position.z <= 535 &&
-      Math.abs(this.position.x) < 550;
+    this.isSwimming = isInSwimmableWater(this.position.x, this.position.z);
 
     // Fatigue affects speed when energy < 20%
     const fatigueFactor = store.energy < 20 ? 0.7 : 1.0;
@@ -242,12 +239,15 @@ export class Player {
     }
 
     // Proposed new position
-    const nextX = this.position.x + this.velocity.x * dt;
-    const nextZ = this.position.z + this.velocity.z * dt;
+    const nextX = THREE.MathUtils.clamp(this.position.x + this.velocity.x * dt, -WORLD_RADIUS + 5, WORLD_RADIUS - 5);
+    const nextZ = THREE.MathUtils.clamp(this.position.z + this.velocity.z * dt, -WORLD_RADIUS + 5, WORLD_RADIUS - 5);
     const nextY = this.position.y + this.velocity.y * dt;
 
     // Dynamic ground elevation from multi-floor buildings, elevators, and staircases
-    const targetGroundY = buildingInteriors.update(this.position, dt);
+    const interiorGroundY = buildingInteriors.update(this.position, dt);
+    const targetGroundY = interiorGroundY > 0
+      ? interiorGroundY
+      : getTerrainHeight(nextX, nextZ);
     this.currentGroundElevation = targetGroundY;
 
     // Horizontal Collision Check
@@ -256,6 +256,7 @@ export class Player {
     let allowedZ = true;
 
     for (const col of colliders) {
+      if (col.type === 'water') continue;
       if (col.type === 'building' && this.position.y >= 5.5) continue;
 
       if (
@@ -297,13 +298,6 @@ export class Player {
     }
     if (landed) this.landingRecovery = 0.55;
     else this.landingRecovery = Math.max(0, this.landingRecovery - dt);
-
-    // Keep swimmers in the bay and respawn if they leave the playable water bounds.
-    if (this.isSwimming && (this.position.z > 535 || Math.abs(this.position.x) >= 550)) {
-      this.position.set(90, 0, 190);
-      this.velocity.set(0, 0, 0);
-      this.isSwimming = false;
-    }
 
     // Rig procedural animation & Arm Aiming Pose
     const currentSpeed = Math.hypot(this.velocity.x, this.velocity.z);
