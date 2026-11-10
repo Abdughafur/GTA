@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { addBox, addCabin, addWheels, createVehicleBuildContext, finishVehicleModel } from '../shared';
+import { addBox, addCabin, addVehicleBody, addWheels, createVehicleBuildContext, finishVehicleModel } from '../shared';
 import { VehicleMeshRig, VehicleRules } from '../../types';
 
 export const rules: VehicleRules = {
@@ -15,7 +15,7 @@ export function buildAmbulance(color: number): VehicleMeshRig {
   const { width, length } = ctx.dimensions;
   const white = new THREE.MeshStandardMaterial({ color: 0xf2eee3, roughness: 0.48 });
   const red = new THREE.MeshStandardMaterial({ color: 0xc52c32, roughness: 0.4, metalness: 0.1 });
-  addBox(ctx, ctx.body, [width, 0.64, length], [0, 0.62, 0], white);
+  addVehicleBody(ctx, { bottomY: 0.3, topY: 0.94, material: white });
   addBox(ctx, ctx.body, [width * 0.94, 1.42, 2.75], [0, 1.68, -0.72], white);
   addCabin(ctx, { width: 1.78, height: 0.68, length: 1.55, y: 1.14, z: 1.0 });
   for (const side of [-1, 1]) {
@@ -42,6 +42,5 @@ export function buildAmbulance(color: number): VehicleMeshRig {
     const flash = Math.sin(performance.now() * 0.02) > 0;
     (redLight.material as THREE.MeshStandardMaterial).emissiveIntensity = flash ? 3 : 0.2;
     (blueLight.material as THREE.MeshStandardMaterial).emissiveIntensity = flash ? 0.2 : 3;
-    if (ctx.steeringWheel) ctx.steeringWheel.rotation.z = -input.steer * 0.38;
   }, { red: redLight, blue: blueLight });
 }

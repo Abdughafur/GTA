@@ -86,16 +86,24 @@ export class WorldChunkStreamer {
   private readonly lampBulbGeometry = new THREE.SphereGeometry(0.38, 8, 6);
   private readonly materialCache = new Map<number, THREE.MeshStandardMaterial>();
   private readonly signMaterialCache = new Map<string, THREE.MeshStandardMaterial>();
+  private readonly sharedGeometries = new Set([
+    this.unitBox,
+    this.unitPlane,
+    this.lampPostGeometry,
+    this.lampBulbGeometry
+  ]);
 
   constructor(
     private readonly scene: THREE.Scene,
-    private readonly colliders: CollisionBox[]
+    private readonly colliders: CollisionBox[],
+    private readonly onCollidersChanged: () => void
   ) {}
 
   public update(position: THREE.Vector3, isNight: boolean) {
     const chunkX = Math.floor((position.x - 60) / CHUNK_SIZE);
     const chunkZ = Math.floor((position.z - 60) / CHUNK_SIZE);
     const wanted = new Set<string>();
+    let collidersChanged = false;
 
     for (let x = chunkX - CHUNK_RADIUS; x <= chunkX + CHUNK_RADIUS; x++) {
       for (let z = chunkZ - CHUNK_RADIUS; z <= chunkZ + CHUNK_RADIUS; z++) {
@@ -113,6 +121,7 @@ export class WorldChunkStreamer {
           this.chunks.set(key, chunk);
           this.scene.add(chunk.group);
           this.colliders.push(...chunk.colliders);
+          collidersChanged = true;
         }
 
         const distance = Math.hypot(centerX - position.x, centerZ - position.z);
@@ -124,16 +133,29 @@ export class WorldChunkStreamer {
     for (const [key, chunk] of this.chunks) {
       if (wanted.has(key)) continue;
       this.scene.remove(chunk.group);
+      this.disposeChunkGeometry(chunk.group);
       const colliderSet = new Set(chunk.colliders);
       for (let i = this.colliders.length - 1; i >= 0; i--) {
         if (colliderSet.has(this.colliders[i])) this.colliders.splice(i, 1);
       }
       this.chunks.delete(key);
+      collidersChanged = true;
     }
 
+    if (collidersChanged) this.onCollidersChanged();
     const nightIntensity = isNight ? 1.15 : 0.08;
     this.windowMaterial.emissiveIntensity = nightIntensity;
     this.lampBulbMaterial.emissiveIntensity = isNight ? 2 : 0.05;
+  }
+
+  private disposeChunkGeometry(group: THREE.Group) {
+    const geometries = new Set<THREE.BufferGeometry>();
+    group.traverse((object) => {
+      if (object instanceof THREE.Mesh && !this.sharedGeometries.has(object.geometry)) {
+        geometries.add(object.geometry);
+      }
+    });
+    for (const geometry of geometries) geometry.dispose();
   }
 
   private createChunk(originX: number, originZ: number): StreamedChunk {

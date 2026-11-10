@@ -25,7 +25,6 @@ export interface CharacterRig {
   leftKnee: THREE.Group;
   rightKnee: THREE.Group;
   firstPersonArms: THREE.Group;
-  setFirstPersonDriving: (driving: boolean) => void;
   updateWatch: (timeOfDay: number) => void;
   setHandTarget: (side: 'left' | 'right', target: THREE.Vector3 | null) => void;
   setFootTarget: (side: 'left' | 'right', target: THREE.Vector3 | null) => void;
@@ -247,33 +246,6 @@ export class ModelFactory {
       palm.position.set(side * 0.2, -0.02, -0.23);
       firstPersonArms.add(palm);
     }
-    const steeringWheel = new THREE.Group();
-    steeringWheel.position.set(0, -0.12, 0.1);
-    steeringWheel.add(
-      new THREE.Mesh(
-        new THREE.TorusGeometry(0.26, 0.025, 8, 24),
-        new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.55 })
-      )
-    );
-    const wheelHub = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.055, 0.055, 0.045, 12),
-      new THREE.MeshStandardMaterial({ color: 0x374151, metalness: 0.65, roughness: 0.35 })
-    );
-    wheelHub.rotation.x = Math.PI / 2;
-    steeringWheel.add(wheelHub);
-    for (const angle of [0, (Math.PI * 2) / 3, (Math.PI * 4) / 3]) {
-      const spoke = new THREE.Mesh(
-        new THREE.BoxGeometry(0.022, 0.22, 0.025),
-        new THREE.MeshStandardMaterial({ color: 0x374151, metalness: 0.65, roughness: 0.35 })
-      );
-      spoke.rotation.z = angle;
-      steeringWheel.add(spoke);
-    }
-    steeringWheel.visible = false;
-    firstPersonArms.add(steeringWheel);
-    const setFirstPersonDriving = (driving: boolean) => {
-      steeringWheel.visible = driving;
-    };
     let watchTexture: THREE.CanvasTexture | null = null;
     if (appearance?.watch) {
       const watch = new THREE.Mesh(
@@ -429,7 +401,6 @@ export class ModelFactory {
       leftKnee: leftLegParts.knee,
       rightKnee: rightLegParts.knee,
       firstPersonArms,
-      setFirstPersonDriving,
       updateWatch,
       setHandTarget,
       setFootTarget,

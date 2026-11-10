@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { addBox, addCabin, addWheels, createVehicleBuildContext, finishVehicleModel } from '../shared';
+import { addBox, addCabin, addVehicleBody, addWheels, createVehicleBuildContext, finishVehicleModel } from '../shared';
 import { VehicleMeshRig, VehicleRules } from '../../types';
 
 export const rules: VehicleRules = {
@@ -13,8 +13,7 @@ export function buildSuv(color: number): VehicleMeshRig {
     width: 2.25, length: 4.95, height: 1.88, wheelBase: 2.92, trackWidth: 1.98, wheelRadius: 0.46
   });
   const { width, length } = ctx.dimensions;
-  addBox(ctx, ctx.body, [width, 0.67, length], [0, 0.62, 0], ctx.bodyMaterial);
-  addBox(ctx, ctx.body, [width * 0.9, 0.18, 1.1], [0, 0.92, 1.62], ctx.bodyMaterial);
+  addVehicleBody(ctx, { bottomY: 0.285, topY: 0.955 });
   addCabin(ctx, { width: 1.96, height: 0.78, length: 3.05, y: 1.42, z: -0.2 });
   addBox(ctx, ctx.body, [width * 0.82, 0.08, length * 0.58], [0, 1.9, -0.15], ctx.chromeMaterial);
   for (const x of [-0.78, 0.78]) {
@@ -27,6 +26,5 @@ export function buildSuv(color: number): VehicleMeshRig {
 
   return finishVehicleModel(ctx, ['raised ride height', 'reinforced bumpers', 'roof rack', 'rear cargo cabin', 'all-terrain wheels'], (dt, speed, input) => {
     ctx.body.rotation.z = THREE.MathUtils.damp(ctx.body.rotation.z, -input.steer * Math.min(Math.abs(speed) / 90, 0.09), 3, dt);
-    if (ctx.steeringWheel) ctx.steeringWheel.rotation.z = -input.steer * 0.48;
   });
 }

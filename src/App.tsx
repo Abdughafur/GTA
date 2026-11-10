@@ -11,6 +11,7 @@ import * as THREE from 'three';
 export default function App() {
   const canvasMountRef = useRef<HTMLDivElement>(null);
   const gameRef = useRef<Game | null>(null);
+  const activeTouchControlsRef = useRef(new Set<string>());
 
   const screen = useGameStore((s) => s.screen);
   const setScreen = useGameStore((s) => s.setScreen);
@@ -59,12 +60,36 @@ export default function App() {
   // Handle touch inputs for mobile
   const handleTouchInput = (key: string, value: number | boolean) => {
     if (!gameRef.current) return;
-    if (key === 'forward') gameRef.current.touchInput.forward = value as number;
-    if (key === 'strafe') gameRef.current.touchInput.strafe = value as number;
-    if (key === 'sprint') gameRef.current.touchInput.sprint = value as boolean;
-    if (key === 'jump') gameRef.current.touchInput.jump = value as boolean;
-    if (key === 'handbrake') gameRef.current.touchInput.handbrake = value as boolean;
+    const active = value === true || value === 1;
+    if (key === 'forward' || key === 'backward' || key === 'left' || key === 'right') {
+      if (active) activeTouchControlsRef.current.add(key);
+      else activeTouchControlsRef.current.delete(key);
+      gameRef.current.touchInput.forward =
+        Number(activeTouchControlsRef.current.has('forward')) -
+        Number(activeTouchControlsRef.current.has('backward'));
+      gameRef.current.touchInput.strafe =
+        Number(activeTouchControlsRef.current.has('right')) -
+        Number(activeTouchControlsRef.current.has('left'));
+      return;
+    }
+    if (key === 'sprint') gameRef.current.touchInput.sprint = active;
+    if (key === 'jump') gameRef.current.touchInput.jump = active;
+    if (key === 'handbrake') gameRef.current.touchInput.handbrake = active;
   };
+
+  const clearTouchInputs = () => {
+    activeTouchControlsRef.current.clear();
+    if (!gameRef.current) return;
+    gameRef.current.touchInput.forward = 0;
+    gameRef.current.touchInput.strafe = 0;
+    gameRef.current.touchInput.sprint = false;
+    gameRef.current.touchInput.jump = false;
+    gameRef.current.touchInput.handbrake = false;
+  };
+
+  useEffect(() => {
+    if (screen !== 'playing' || isPaused) clearTouchInputs();
+  }, [screen, isPaused]);
 
   // Start game from title screen
   const handleStartGame = () => {
@@ -116,6 +141,7 @@ export default function App() {
         <HUD
           onToggleVehicle={handleToggleVehicle}
           onTouchInput={handleTouchInput}
+          onContextAction={() => gameRef.current?.triggerContextAction()}
           onPause={() => setIsPaused(true)}
           onShoot={() => gameRef.current?.shootWeapon()}
           onAimToggle={() => gameRef.current?.toggleAim()}

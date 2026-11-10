@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { addBox, addCabin, addWheels, createVehicleBuildContext, finishVehicleModel } from '../shared';
+import { addBox, addCabin, addVehicleBody, addWheels, createVehicleBuildContext, finishVehicleModel } from '../shared';
 import { VehicleMeshRig, VehicleRules } from '../../types';
 
 export const rules: VehicleRules = {
@@ -13,7 +13,7 @@ export function buildTaxi(color: number): VehicleMeshRig {
     width: 2.02, length: 4.65, height: 1.48, wheelBase: 2.72, trackWidth: 1.78, wheelRadius: 0.39
   });
   const { width, length } = ctx.dimensions;
-  addBox(ctx, ctx.body, [width, 0.48, length], [0, 0.48, 0], ctx.bodyMaterial);
+  addVehicleBody(ctx, { bottomY: 0.24, topY: 0.72 });
   addBox(ctx, ctx.body, [width * 0.94, 0.24, 1.05], [0, 0.69, 1.35], ctx.bodyMaterial);
   addCabin(ctx, { width: 1.7, height: 0.62, length: 2.35, y: 1.0, z: -0.12 });
 
@@ -37,6 +37,5 @@ export function buildTaxi(color: number): VehicleMeshRig {
 
   return finishVehicleModel(ctx, ['commercial four-door interior', 'roof taxi sign', 'checker livery', 'passenger-ready rear seats'], (dt, speed, input) => {
     roofSign.rotation.z = Math.sin(performance.now() * 0.003) * 0.015;
-    if (ctx.steeringWheel) ctx.steeringWheel.rotation.z = -input.steer * 0.4;
   });
 }

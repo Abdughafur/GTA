@@ -4,6 +4,7 @@ import { CITY_ROAD_COORDS, CollisionBox, TrafficSignalData } from '../world/City
 import { audioManager } from '../core/AudioManager';
 import { CharacterRig, modelFactory } from '../world/ModelFactory';
 import { useGameStore } from '../core/gameState';
+import { CollisionGrid } from '../world/CollisionGrid';
 
 interface NavRoute {
   axis: 'x' | 'z';
@@ -24,6 +25,8 @@ export class TrafficCarAI {
   private lastHealth = 100;
   private lastIntersectionPosition: THREE.Vector3 | null = null;
   private hornCooldown = 0;
+  private passingVehicle: Vehicle | null = null;
+  private passingSide: -1 | 0 | 1 = 0;
 
   constructor(config: VehicleConfig, startPos: THREE.Vector3, heading: number, axis: 'x' | 'z', dir: 1 | -1) {
     this.vehicle = new Vehicle(config, startPos, heading);
@@ -57,12 +60,11 @@ export class TrafficCarAI {
 
   public update(
     playerPos: THREE.Vector3,
-    allCars: TrafficCarAI[],
     colliders: CollisionBox[],
     dt: number,
-    otherVehicles: Vehicle[] = [],
     greenAxis: 'x' | 'z' = 'z',
-    rushHour = false
+    rushHour = false,
+    vehicleCollisionList: Vehicle[]
   ) {
     if (this.vehicle.isPlayerDriving) return;
 
@@ -99,14 +101,8 @@ export class TrafficCarAI {
       }
     }
 
-    // Steer towards target heading
-    let diff = this.targetHeading - this.vehicle.heading;
-    while (diff < -Math.PI) diff += Math.PI * 2;
-    while (diff > Math.PI) diff -= Math.PI * 2;
-    const steer = Math.max(-1, Math.min(1, diff * 2.5));
-
-    // Obstacle and traffic collision check
     const fwdVec = new THREE.Vector3(Math.sin(this.vehicle.heading), 0, Math.cos(this.vehicle.heading));
+    const rightVec = new THREE.Vector3(Math.cos(this.vehicle.heading), 0, -Math.sin(this.vehicle.heading));
     let blockedAhead = false;
     const forwardCoord = this.laneAxis === 'z' ? pos.z : pos.x;
     const nextIntersectionDistance = roadGridLines.reduce((nearest, line) => {
@@ -143,19 +139,109 @@ export class TrafficCarAI {
       }
     }
 
-    // Check distance to other traffic cars
-    for (const other of allCars) {
-      if (blockedAhead) break;
-      if (other === this) continue;
-      const d = pos.distanceTo(other.vehicle.position);
-      if (d < 11) {
-        const toOther = new THREE.Vector3().subVectors(other.vehicle.position, pos).normalize();
-        if (fwdVec.dot(toOther) > 0.6) {
-          blockedAhead = true;
+    // Keep a safe following distance, but pass a blocked lane when there is room.
+    let nearestHazard: Vehicle | null = null;
+    let nearestHazardDistance = Number.POSITIVE_INFINITY;
+    for (const other of vehicleCollisionList) {
+      if (other === this.vehicle || other.isDestroyed) continue;
+      const dx = other.position.x - pos.x;
+      const dz = other.position.z - pos.z;
+      const forwardDistance = dx * fwdVec.x + dz * fwdVec.z;
+      const lateralDistance = dx * rightVec.x + dz * rightVec.z;
+      const detectionDistance = Math.max(14, Math.abs(this.vehicle.speed) * 0.9 + 5);
+      if (
+        forwardDistance > -0.5 &&
+        forwardDistance < detectionDistance &&
+        Math.abs(lateralDistance) < this.vehicle.collisionRadius + other.collisionRadius + 1.5 &&
+        forwardDistance < nearestHazardDistance
+      ) {
+        nearestHazard = other;
+        nearestHazardDistance = forwardDistance;
+      }
+    }
+
+    if (this.passingVehicle) {
+      const dx = this.passingVehicle.position.x - pos.x;
+      const dz = this.passingVehicle.position.z - pos.z;
+      const relativeForward = dx * fwdVec.x + dz * fwdVec.z;
+      if (relativeForward < -4 || Math.hypot(dx, dz) > 30 || this.passingVehicle.isDestroyed) {
+        this.passingVehicle = null;
+        this.passingSide = 0;
+      }
+    }
+
+    if (nearestHazard) this.passingVehicle = nearestHazard;
+
+    const allowPass = this.laneAxis === greenAxis || nextIntersectionDistance > 16;
+    let passWaypoint: THREE.Vector3 | null = null;
+    if (this.passingVehicle && allowPass) {
+      const hazard = this.passingVehicle;
+      const dx = hazard.position.x - pos.x;
+      const dz = hazard.position.z - pos.z;
+      const forwardDistance = dx * fwdVec.x + dz * fwdVec.z;
+      const lateralDistance = dx * rightVec.x + dz * rightVec.z;
+      const forwardStep = Math.max(6, forwardDistance + 4);
+      const desiredPassOffset = this.vehicle.collisionRadius + hazard.collisionRadius + 0.2;
+      const preferredSide: -1 | 1 = lateralDistance > 0 ? -1 : 1;
+      const alternateSide: -1 | 1 = preferredSide === 1 ? -1 : 1;
+      const currentAlternateSide: -1 | 1 = this.passingSide === 1 ? -1 : 1;
+      const sides: Array<-1 | 1> = this.passingSide
+        ? [this.passingSide, currentAlternateSide]
+        : [preferredSide, alternateSide];
+      const perpendicularPosition = this.laneAxis === 'z' ? pos.x : pos.z;
+      const roadCenter = roadGridLines.reduce((nearest, line) =>
+        Math.abs(line - perpendicularPosition) < Math.abs(nearest - perpendicularPosition) ? line : nearest
+      );
+      const maxRoadOffset = 10 - this.vehicle.collisionRadius * 0.7;
+      const roadMin = roadCenter - maxRoadOffset;
+      const roadMax = roadCenter + maxRoadOffset;
+
+      for (const side of sides) {
+        const lateralDirection = this.laneAxis === 'z' ? rightVec.x : rightVec.z;
+        const availableOffset = lateralDirection * side > 0
+          ? roadMax - perpendicularPosition
+          : perpendicularPosition - roadMin;
+        const passOffset = Math.min(desiredPassOffset, Math.max(0, availableOffset));
+        if (passOffset < this.vehicle.collisionRadius * 0.8) continue;
+
+        const rawX = pos.x + fwdVec.x * forwardStep + rightVec.x * passOffset * side;
+        const rawZ = pos.z + fwdVec.z * forwardStep + rightVec.z * passOffset * side;
+        const waypointX = this.laneAxis === 'z' ? rawX : pos.x + fwdVec.x * forwardStep;
+        const waypointZ = this.laneAxis === 'x' ? rawZ : pos.z + fwdVec.z * forwardStep;
+        const waypointCross = this.laneAxis === 'z' ? waypointX : waypointZ;
+        if (waypointCross < roadMin || waypointCross > roadMax) continue;
+        const carSpaceClear = vehicleCollisionList.every((other) => {
+          if (other === this.vehicle || other.isDestroyed) return true;
+          const requiredSpace = this.vehicle.collisionRadius + other.collisionRadius + 0.6;
+          return Math.hypot(other.position.x - waypointX, other.position.z - waypointZ) > requiredSpace;
+        });
+        const roadSpaceClear = !colliders.some((collider) =>
+          waypointX + this.vehicle.collisionRadius > collider.minX &&
+          waypointX - this.vehicle.collisionRadius < collider.maxX &&
+          waypointZ + this.vehicle.collisionRadius > collider.minZ &&
+          waypointZ - this.vehicle.collisionRadius < collider.maxZ
+        );
+        if (carSpaceClear && roadSpaceClear && Math.abs(waypointCross - roadCenter) < 10) {
+          this.passingSide = side;
+          passWaypoint = new THREE.Vector3(waypointX, 0, waypointZ);
           break;
         }
       }
+    } else if (!nearestHazard && !this.passingVehicle) {
+      this.passingSide = 0;
     }
+
+    if (this.passingVehicle && !passWaypoint) blockedAhead = true;
+
+    let desiredHeading = this.targetHeading;
+    if (passWaypoint) {
+      desiredHeading = Math.atan2(passWaypoint.x - pos.x, passWaypoint.z - pos.z);
+      blockedAhead = false;
+    }
+    let diff = desiredHeading - this.vehicle.heading;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    const steer = Math.max(-1, Math.min(1, diff * 2.5));
 
     let throttle = 0;
     let brake = 0;
@@ -180,8 +266,26 @@ export class TrafficCarAI {
       { throttle, brake, steer, handbrake: false },
       colliders,
       dt,
-      [...allCars.map((car) => car.vehicle), ...otherVehicles]
+      vehicleCollisionList
     );
+
+    const updatedCrossPosition = this.laneAxis === 'z'
+      ? this.vehicle.position.x
+      : this.vehicle.position.z;
+    const roadCenter = roadGridLines.reduce((nearest, line) =>
+      Math.abs(line - updatedCrossPosition) < Math.abs(nearest - updatedCrossPosition) ? line : nearest
+    );
+    const roadLimit = 10 - this.vehicle.collisionRadius * 0.7;
+    const laneLimit = 4.5;
+    const minCrossPosition = Math.max(roadCenter - roadLimit, this.laneCoord - laneLimit);
+    const maxCrossPosition = Math.min(roadCenter + roadLimit, this.laneCoord + laneLimit);
+    const safeCrossPosition = THREE.MathUtils.clamp(updatedCrossPosition, minCrossPosition, maxCrossPosition);
+    if (safeCrossPosition !== updatedCrossPosition) {
+      if (this.laneAxis === 'z') this.vehicle.position.x = safeCrossPosition;
+      else this.vehicle.position.z = safeCrossPosition;
+      this.vehicle.speed = 0;
+      this.vehicle.group.position.copy(this.vehicle.position);
+    }
   }
 }
 
@@ -190,8 +294,8 @@ export class TrafficManager {
   public trafficCars: TrafficCarAI[] = [];
   private roadNodes: THREE.Vector3[];
   private scene: THREE.Scene;
-  private colliders: CollisionBox[];
   private trafficSignals: TrafficSignalData[];
+  private collisionGrid: CollisionGrid;
   private signalClock = 0;
   private greenAxis: 'x' | 'z' = 'z';
   private isYellow = false;
@@ -199,13 +303,13 @@ export class TrafficManager {
   constructor(
     scene: THREE.Scene,
     roadNodes: THREE.Vector3[],
-    colliders: CollisionBox[],
-    trafficSignals: TrafficSignalData[] = []
+    trafficSignals: TrafficSignalData[],
+    collisionGrid: CollisionGrid
   ) {
     this.scene = scene;
     this.roadNodes = roadNodes;
-    this.colliders = colliders;
     this.trafficSignals = trafficSignals;
+    this.collisionGrid = collisionGrid;
     this.spawnTrafficPool(22);
   }
 
@@ -297,6 +401,7 @@ export class TrafficManager {
     this.updateTrafficSignals(dt);
     const timeOfDay = useGameStore.getState().timeOfDay;
     const rushHour = (timeOfDay >= 7 && timeOfDay < 9) || (timeOfDay >= 16 && timeOfDay < 18);
+    const vehicleCollisionList = [...this.trafficCars.map((car) => car.vehicle), ...otherVehicles];
     for (const trafficAI of this.trafficCars) {
       const dist = trafficAI.vehicle.position.distanceTo(playerPos);
 
@@ -323,7 +428,14 @@ export class TrafficManager {
         continue;
       }
 
-      trafficAI.update(playerPos, this.trafficCars, this.colliders, dt, otherVehicles, this.greenAxis, rushHour);
+      trafficAI.update(
+        playerPos,
+        this.collisionGrid.getNearby(trafficAI.vehicle.position.x, trafficAI.vehicle.position.z, 32),
+        dt,
+        this.greenAxis,
+        rushHour,
+        vehicleCollisionList
+      );
     }
   }
 }

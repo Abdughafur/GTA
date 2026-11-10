@@ -13,6 +13,8 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ onStartGame }) => 
   const setScreen = useGameStore((s) => s.setScreen);
   const weather = useGameStore((s) => s.weather);
   const setWeather = useGameStore((s) => s.setWeather);
+  const touchMode = useGameStore((s) => s.touchMode);
+  const setTouchMode = useGameStore((s) => s.setTouchMode);
 
   const [activeModal, setActiveModal] = useState<'none' | 'settings' | 'credits'>('none');
   const [tipIndex, setTipIndex] = useState(0);
@@ -144,6 +146,24 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ onStartGame }) => 
             </div>
 
             <div className="space-y-3 text-xs">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={touchMode}
+                onClick={() => setTouchMode(!touchMode)}
+                className="flex min-h-14 w-full items-center justify-between rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-left transition hover:border-sky-400/60"
+              >
+                <span>
+                  <span className="block font-semibold text-slate-100">Touch mode</span>
+                  <span className="mt-1 block text-[11px] text-slate-400">
+                    On-screen controls and touch camera for phones and touch displays
+                  </span>
+                </span>
+                <span className={`ml-4 rounded-full px-3 py-1 text-[10px] font-bold ${touchMode ? 'bg-sky-500 text-slate-950' : 'bg-slate-800 text-slate-400'}`}>
+                  {touchMode ? 'ON' : 'OFF'}
+                </span>
+              </button>
+
               <div>
                 <label className="text-slate-300 font-semibold block mb-1">Time of Day & Atmosphere</label>
                 <div className="grid grid-cols-3 gap-2">

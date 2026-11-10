@@ -950,21 +950,21 @@ export class CityGenerator {
     const airport = new THREE.Group();
     const asphalt = new THREE.MeshStandardMaterial({ color: 0x353c3d, roughness: 0.86 });
     const concrete = new THREE.MeshStandardMaterial({ color: 0xc3c2b8, roughness: 0.82 });
-    const runway = new THREE.Mesh(new THREE.PlaneGeometry(38, 210), asphalt);
+    const runway = new THREE.Mesh(new THREE.PlaneGeometry(54, 560), asphalt);
     runway.rotation.x = -Math.PI / 2;
     runway.position.set(325, 0.08, -300);
     airport.add(runway);
 
     const centerLineMat = new THREE.MeshBasicMaterial({ color: 0xfff4d0 });
-    for (let z = -395; z <= -205; z += 16) {
+    for (let z = -575; z <= -25; z += 22) {
       const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 7), centerLineMat);
       dash.rotation.x = -Math.PI / 2;
       dash.position.set(325, 0.1, z);
       airport.add(dash);
     }
 
-    for (const x of [306, 344]) {
-      for (let z = -395; z <= -205; z += 12) {
+    for (const x of [296, 354]) {
+      for (let z = -575; z <= -25; z += 12) {
         const light = new THREE.Mesh(
           new THREE.BoxGeometry(0.38, 0.18, 0.38),
           new THREE.MeshBasicMaterial({ color: 0xfde68a })
@@ -974,21 +974,21 @@ export class CityGenerator {
       }
     }
 
-    const apron = new THREE.Mesh(new THREE.PlaneGeometry(110, 64), concrete);
+    const apron = new THREE.Mesh(new THREE.PlaneGeometry(190, 170), concrete);
     apron.rotation.x = -Math.PI / 2;
-    apron.position.set(325, 0.06, -185);
+    apron.position.set(325, 0.06, -120);
     airport.add(apron);
 
     const terminal = new THREE.Mesh(
-      new THREE.BoxGeometry(86, 15, 25),
+      new THREE.BoxGeometry(140, 20, 34),
       new THREE.MeshStandardMaterial({ color: 0xe7e1d3, roughness: 0.55 })
     );
-    terminal.position.set(325, 7.5, -167);
+    terminal.position.set(325, 10, -167);
     terminal.castShadow = true;
     airport.add(terminal);
 
     const terminalGlass = new THREE.Mesh(
-      new THREE.BoxGeometry(78, 7, 0.5),
+      new THREE.BoxGeometry(130, 10, 0.5),
       new THREE.MeshPhysicalMaterial({
         color: 0x68b8d0,
         roughness: 0.16,
@@ -996,14 +996,14 @@ export class CityGenerator {
         clearcoat: 1
       })
     );
-    terminalGlass.position.set(325, 8, -154.2);
+    terminalGlass.position.set(325, 10, -149.2);
     airport.add(terminalGlass);
 
     const canopy = new THREE.Mesh(
-      new THREE.BoxGeometry(95, 1, 34),
+      new THREE.BoxGeometry(156, 1, 43),
       new THREE.MeshStandardMaterial({ color: 0xf3eee2, roughness: 0.45 })
     );
-    canopy.position.set(325, 16, -165);
+    canopy.position.set(325, 20.5, -163);
     airport.add(canopy);
 
     const tower = new THREE.Group();
@@ -1029,10 +1029,10 @@ export class CityGenerator {
     airport.add(tower);
 
     const sign = new THREE.Mesh(
-      new THREE.BoxGeometry(38, 4, 0.8),
+      new THREE.BoxGeometry(54, 4, 0.8),
       new THREE.MeshStandardMaterial({ color: 0x1689a2, emissive: 0x06323b, emissiveIntensity: 0.3 })
     );
-    sign.position.set(325, 12, -153.7);
+    sign.position.set(325, 16, -148.7);
     airport.add(sign);
 
     cityGroup.add(airport);

@@ -121,7 +121,7 @@ export class Player {
       this.firstPersonWeaponMeshes[weaponType as WeaponType] = viewmodelWeapon;
     }
 
-    this.updateActiveWeaponMesh('pistol');
+    this.updateActiveWeaponMesh('fists');
   }
 
   public updateActiveWeaponMesh(weapon: WeaponType) {
@@ -139,7 +139,8 @@ export class Player {
     input: { forward: number; strafe: number; sprint: boolean; jump: boolean },
     cameraYaw: number,
     colliders: CollisionBox[],
-    dt: number
+    dt: number,
+    pedestrianPositions: THREE.Vector3[] = []
   ) {
     const store = useGameStore.getState();
 
@@ -254,6 +255,15 @@ export class Player {
     const playerRadius = 0.45;
     let allowedX = true;
     let allowedZ = true;
+    const actorCollisionRadius = 0.95;
+    for (const actorPosition of pedestrianPositions) {
+      if (Math.hypot(nextX - actorPosition.x, this.position.z - actorPosition.z) < actorCollisionRadius) {
+        allowedX = false;
+      }
+      if (Math.hypot(this.position.x - actorPosition.x, nextZ - actorPosition.z) < actorCollisionRadius) {
+        allowedZ = false;
+      }
+    }
 
     for (const col of colliders) {
       if (col.type === 'water') continue;

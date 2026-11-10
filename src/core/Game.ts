@@ -15,6 +15,7 @@ import { buildingInteriors } from '../world/BuildingInteriors';
 import { furnitureFactory } from '../world/FurnitureFactory';
 import { transitSystem } from '../world/TransitSystem';
 import { WorldChunkStreamer } from '../world/WorldChunkStreamer';
+import { CollisionGrid } from '../world/CollisionGrid';
 
 export class Game {
   public scene: THREE.Scene;
@@ -23,6 +24,7 @@ export class Game {
   private environmentSystem!: EnvironmentSystem;
   private cityData!: CityData;
   private worldChunkStreamer!: WorldChunkStreamer;
+  private collisionGrid!: CollisionGrid;
 
   public player!: Player;
   public vehicles: Vehicle[] = [];
@@ -48,6 +50,10 @@ export class Game {
   private customizedVehicle: Vehicle | null = null;
   private appliedCustomizationKey = '';
   private appliedGraphicsQuality: 'low' | 'medium' | 'high' | 'ultra' | null = null;
+  private appliedTouchMode: boolean | null = null;
+  private waterUpdateAccumulator = 0;
+  private touchCameraPointerId: number | null = null;
+  private lastTouchCameraPosition = new THREE.Vector2();
   private readonly fixedStep = 1 / 60;
   private isRunning = false;
   private isSoftwareGl = false;
@@ -98,6 +104,7 @@ export class Game {
     this.renderer.shadowMap.enabled = !this.isSoftwareGl;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.setSize(container.clientWidth, container.clientHeight);
+    this.renderer.domElement.style.touchAction = 'none';
     container.appendChild(this.renderer.domElement);
 
     // 2. Scene & Camera
@@ -113,6 +120,52 @@ export class Game {
     // 4. Bind Events
     this.bindInputs();
     window.addEventListener('resize', this.onResize);
+    this.container.addEventListener('pointerdown', this.onTouchCameraStart);
+    this.container.addEventListener('pointermove', this.onTouchCameraMove);
+    this.container.addEventListener('pointerup', this.onTouchCameraEnd);
+    this.container.addEventListener('pointercancel', this.onTouchCameraEnd);
+  }
+
+  private onTouchCameraStart = (event: PointerEvent) => {
+    if (
+      event.pointerType !== 'touch' ||
+      !useGameStore.getState().touchMode ||
+      useGameStore.getState().screen !== 'playing' ||
+      useGameStore.getState().isPhoneOpen ||
+      event.target !== this.renderer.domElement
+    ) return;
+    this.touchCameraPointerId = event.pointerId;
+    this.lastTouchCameraPosition.set(event.clientX, event.clientY);
+    this.renderer.domElement.setPointerCapture(event.pointerId);
+  };
+
+  private onTouchCameraMove = (event: PointerEvent) => {
+    if (event.pointerId !== this.touchCameraPointerId) return;
+    const deltaX = event.clientX - this.lastTouchCameraPosition.x;
+    const deltaY = event.clientY - this.lastTouchCameraPosition.y;
+    this.lastTouchCameraPosition.set(event.clientX, event.clientY);
+    this.cameraController.handleMouseMove(deltaX, deltaY);
+  };
+
+  private onTouchCameraEnd = (event: PointerEvent) => {
+    if (event.pointerId === this.touchCameraPointerId) {
+      this.touchCameraPointerId = null;
+    }
+  };
+
+  public triggerContextAction() {
+    if (transitSystem.isPlayerFlyingPlane) {
+      transitSystem.togglePlaneAutopilot();
+      return;
+    }
+    const previousInterior = useGameStore.getState().currentInterior;
+    buildingInteriors.triggerActiveAction(this.player.position);
+    const currentInterior = useGameStore.getState().currentInterior;
+    if (currentInterior !== previousInterior) {
+      this.player.velocity.set(0, 0, 0);
+      this.player.isGrounded = true;
+      this.player.currentGroundElevation = currentInterior === 'supermarket' ? 300 : 0;
+    }
   }
 
   private initSystems() {
@@ -125,12 +178,17 @@ export class Game {
     // City & Colliders
     this.cityData = cityGenerator.generateCity();
     this.scene.add(this.cityData.cityGroup);
-    this.worldChunkStreamer = new WorldChunkStreamer(this.scene, this.cityData.colliders);
-    store.setLoading(45, 'Synthesizing PBR Textures & Multi-Floor Interiors...');
 
     // Multi-Floor Building Interiors (Safehouse, Penthouse, Elevator, Hospital)
     this.scene.add(buildingInteriors.rootGroup);
     this.cityData.colliders.push(...buildingInteriors.colliders);
+    this.collisionGrid = new CollisionGrid(this.cityData.colliders);
+    this.worldChunkStreamer = new WorldChunkStreamer(
+      this.scene,
+      this.cityData.colliders,
+      () => this.collisionGrid.rebuild()
+    );
+    store.setLoading(45, 'Synthesizing PBR Textures & Multi-Floor Interiors...');
     this.farmAnimalManager = new FarmAnimalManager(
       this.scene,
       this.cityData.farmBounds,
@@ -226,11 +284,11 @@ export class Game {
     this.trafficManager = new TrafficManager(
       this.scene,
       this.cityData.roadNodes,
-      this.cityData.colliders,
-      this.cityData.trafficSignals
+      this.cityData.trafficSignals,
+      this.collisionGrid
     );
-    this.pedestrianManager = new PedestrianManager(this.scene, this.cityData.colliders);
-    this.policeSystem = new PoliceSystem(this.scene, this.cityData.colliders);
+    this.pedestrianManager = new PedestrianManager(this.scene, this.cityData.colliders, this.collisionGrid);
+    this.policeSystem = new PoliceSystem(this.scene, this.collisionGrid);
 
     // Missions
     this.missionManager = new MissionManager(this.scene);
@@ -265,8 +323,15 @@ export class Game {
       }
 
       // Enter / Exit Vehicle on 'E'
-      if (e.code === 'KeyE') {
+      if (e.code === 'KeyE' && !e.repeat) {
         this.toggleVehicle();
+      }
+
+      if (e.code === 'KeyQ' && !e.repeat && !transitSystem.isPlayerRidingTrain) {
+        const stationIndex = transitSystem.getNearbyMetroStationIndex(this.player.position);
+        if (stationIndex >= 0) {
+          transitSystem.cycleMetroDestination(stationIndex);
+        }
       }
 
       // Seatbelt Toggle on 'KeyB'
@@ -278,14 +343,11 @@ export class Game {
 
       // Context Action Key 'KeyF'
       if (e.code === 'KeyF' && !e.repeat) {
-        const previousInterior = store.currentInterior;
-        buildingInteriors.triggerActiveAction(this.player.position);
-        const currentInterior = useGameStore.getState().currentInterior;
-        if (currentInterior !== previousInterior) {
-          this.player.velocity.set(0, 0, 0);
-          this.player.isGrounded = true;
-          this.player.currentGroundElevation = currentInterior === 'supermarket' ? 300 : 0;
-        }
+        this.triggerContextAction();
+      }
+
+      if (e.code === 'KeyG' && !e.repeat && transitSystem.isPlayerFlyingPlane && transitSystem.isPlaneAutopilot) {
+        transitSystem.cyclePlaneAutopilotSpeed();
       }
 
       // Smartphone on 'KeyP' or 'ArrowUp'
@@ -370,10 +432,16 @@ export class Game {
 
     // 0. Airplane Exit
     if (transitSystem.isPlayerFlyingPlane) {
+      if (transitSystem.planePos.y > 0.8 || transitSystem.planeSpeed > 5) {
+        store.showNotification('Land on the runway and stop the aircraft before exiting.');
+        return;
+      }
       transitSystem.isPlayerFlyingPlane = false;
+      transitSystem.isPlaneAutopilot = false;
       store.setIsInPlane(false);
       const exitPos = transitSystem.planePos.clone();
-      exitPos.x += 4.5;
+      exitPos.x += Math.cos(transitSystem.planeHeading) * 4.5;
+      exitPos.z -= Math.sin(transitSystem.planeHeading) * 4.5;
       exitPos.y = 0;
       this.player.position.copy(exitPos);
       this.player.group.visible = true;
@@ -385,16 +453,44 @@ export class Game {
 
     // 0B. Train Exit
     if (transitSystem.isPlayerRidingTrain) {
-      transitSystem.isPlayerRidingTrain = false;
-      store.setIsInTrain(false);
-      const exitPos = transitSystem.trainGroup.position.clone();
-      exitPos.x += 3.5;
-      exitPos.y = 0;
-      this.player.position.copy(exitPos);
+      const stationIndex = transitSystem.currentTrainStationIndex;
+      if (!transitSystem.alightMetroTrain(this.player.position)) {
+        store.showNotification('Wait until the train reaches a station and opens its doors.');
+        return;
+      }
       this.player.group.visible = true;
       this.cameraController.mode = 'onFoot';
       audioManager.playDoorClose();
-      store.showNotification('Disembarked Vice Bay Metro Commuter Train');
+      store.showNotification(`Exited at ${transitSystem.getMetroStationName(stationIndex)}.`);
+      return;
+    }
+
+    const stationIndex = transitSystem.getNearbyMetroStationIndex(this.player.position);
+    if (stationIndex >= 0) {
+      if (transitSystem.metroTicketDestinationIndex < 0) {
+        transitSystem.buyMetroTicket(stationIndex);
+        return;
+      }
+
+      const trainIndex = transitSystem.getTrainStoppedAtStation(stationIndex);
+      if (trainIndex < 0) {
+        const arrival = Math.ceil(transitSystem.getMetroArrivalSeconds(stationIndex));
+        store.showNotification(
+          `Ticket ready for ${transitSystem.getMetroTicketDestinationName()}. Next train in ${arrival}s.`
+        );
+        return;
+      }
+      if (transitSystem.boardMetroTrain(trainIndex, stationIndex)) {
+        this.player.group.visible = true;
+        this.player.heading = transitSystem.getPlayerTrainGroup().rotation.y + Math.PI / 2;
+        this.player.group.rotation.y = this.player.heading;
+        this.player.rig.animate(0, false, true, 0.016);
+        this.cameraController.mode = 'vehicle';
+        audioManager.playTrainRide();
+        store.showNotification(
+          `Boarded Line A. Destination: ${transitSystem.getMetroStationName(transitSystem.selectedMetroDestinationIndex)}.`
+        );
+      }
       return;
     }
 
@@ -434,6 +530,10 @@ export class Game {
 
       const leavingVeh = this.currentVehicle;
       leavingVeh.isPlayerDriving = false;
+      leavingVeh.isParked = leavingVeh.config.type === 'police' &&
+        this.policeSystem.cruisers.some((cruiser) =>
+          cruiser.vehicle === leavingVeh && cruiser.hasDeployedOfficers
+        );
       this.currentVehicle = null;
 
       store.setIsInVehicle(false);
@@ -456,19 +556,7 @@ export class Game {
       this.cameraController.mode = 'vehicle';
       audioManager.playDoorClose();
       audioManager.playPlaneTurbine(0.4);
-      store.showNotification('Piloting Luxor Jet Airliner! [Space] Roll runway & accelerate · [W/S] Pitch · [A/D] Bank');
-      return;
-    }
-
-    // 3B. Train Boarding Check (< 6.0m)
-    const trainDist = this.player.position.distanceTo(transitSystem.trainGroup.position);
-    if (trainDist < 6.0) {
-      transitSystem.isPlayerRidingTrain = true;
-      store.setIsInTrain(true);
-      this.player.group.visible = false;
-      this.cameraController.mode = 'vehicle';
-      audioManager.playTrainRide();
-      store.showNotification('Boarded Vice Bay Metro Train! Enjoy the scenic city loop.');
+      store.showNotification('Piloting Luxor Jet · [W/S] Throttle · [Space/Shift] Pitch · [A/D] Bank · [F] Autopilot');
       return;
     }
 
@@ -529,7 +617,11 @@ export class Game {
     let closestVeh: Vehicle | null = null;
     let minDist = 4.5;
 
-    const allVehicles = [...this.vehicles, ...this.trafficManager.vehicles];
+    const allVehicles = [
+      ...this.vehicles,
+      ...this.trafficManager.vehicles,
+      ...this.policeSystem.cruisers.map((cruiser) => cruiser.vehicle)
+    ];
     for (const veh of allVehicles) {
       if (veh.isDestroyed) continue;
       const dist = this.player.position.distanceTo(veh.position);
@@ -544,6 +636,7 @@ export class Game {
       audioManager.playDoorOpen();
       this.currentVehicle = closestVeh;
       this.currentVehicle.isPlayerDriving = true;
+      this.currentVehicle.isParked = false;
       this.player.currentVehicleIndex = 0;
       this.player.group.visible = false;
 
@@ -836,7 +929,7 @@ export class Game {
     if (steps === 6) {
       this.simulationAccumulator = Math.min(this.simulationAccumulator, this.fixedStep);
     }
-    this.updateCityMotion();
+    this.updateCityMotion(Math.min(rawDt, 0.1));
     const renderAlpha = this.simulationAccumulator / this.fixedStep;
     for (const vehicle of this.getAllVehicles()) {
       vehicle.setRenderAlpha(renderAlpha);
@@ -850,12 +943,16 @@ export class Game {
     }
   };
 
-  private updateCityMotion() {
+  private updateCityMotion(dt: number) {
     for (const object of this.cityData.motion.windSwayObjects) {
       const phase = object.userData.windPhase as number;
       object.rotation.z = Math.sin(this.simulationTime * 0.55 + phase) * 0.035;
       object.rotation.x = Math.cos(this.simulationTime * 0.38 + phase) * 0.018;
     }
+
+    this.waterUpdateAccumulator += dt;
+    if (this.waterUpdateAccumulator < 1 / 15) return;
+    this.waterUpdateAccumulator %= 1 / 15;
 
     const position = this.cityData.motion.oceanGeometry.attributes.position as THREE.BufferAttribute;
     const heights = position.array as Float32Array;
@@ -873,12 +970,17 @@ export class Game {
 
   private applyGraphicsQuality() {
     const quality = useGameStore.getState().graphicsQuality;
-    if (quality === this.appliedGraphicsQuality) return;
+    const touchMode = useGameStore.getState().touchMode;
+    if (quality === this.appliedGraphicsQuality && touchMode === this.appliedTouchMode) return;
 
     const pixelRatioCaps = { low: 1, medium: 1.25, high: 1.75, ultra: 2 };
-    const shadowSizes = { low: 0, medium: 1024, high: 2048, ultra: 3072 };
+    const shadowSizes = touchMode
+      ? { low: 0, medium: 768, high: 1024, ultra: 1536 }
+      : { low: 0, medium: 1024, high: 2048, ultra: 3072 };
     this.renderer.setPixelRatio(
-      this.isSoftwareGl ? 1 : Math.min(window.devicePixelRatio || 1, pixelRatioCaps[quality])
+      this.isSoftwareGl
+        ? 1
+        : Math.min(window.devicePixelRatio || 1, pixelRatioCaps[quality], touchMode ? 1.25 : 2)
     );
     this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
     this.renderer.shadowMap.enabled = !this.isSoftwareGl && quality !== 'low';
@@ -887,6 +989,7 @@ export class Game {
       this.environmentSystem.dirLight.shadow.needsUpdate = true;
     }
     this.appliedGraphicsQuality = quality;
+    this.appliedTouchMode = touchMode;
   }
 
   private tick(dt: number) {
@@ -967,20 +1070,35 @@ export class Game {
     if (transitSystem.isPlayerFlyingPlane) {
       this.cameraController.mode = 'vehicle';
       const flightInput = {
-        forward: (isBackward ? 1 : 0) - (isForward ? 1 : 0), // W pitch down, S pitch up
-        strafe: (isRight ? 1 : 0) - (isLeft ? 1 : 0), // A roll left, D roll right
-        ascend: isJump, // Space jet acceleration
-        descend: isSprint // Shift airbrake
+        forward: (isForward ? 1 : 0) - (isBackward ? 1 : 0),
+        strafe: (isRight ? 1 : 0) - (isLeft ? 1 : 0),
+        ascend: isJump,
+        descend: isSprint
       };
-      transitSystem.update(this.player.position, flightInput, dt);
+      transitSystem.update(this.player.position, flightInput, dt, this.pedestrianManager.pedestrians, this.scene);
       const planeKts = Math.round(transitSystem.planeSpeed * 1.94);
       store.setVehicleStats(planeKts, 100, 1, 4800);
       this.player.position.copy(transitSystem.planePos);
     } else if (transitSystem.isPlayerRidingTrain) {
       this.cameraController.mode = 'vehicle';
-      transitSystem.update(this.player.position, { forward: 0, strafe: 0, ascend: false, descend: false }, dt);
-      this.player.position.copy(transitSystem.trainGroup.position);
-      store.setVehicleStats(38, 100, 1, 2400);
+      transitSystem.update(
+        this.player.position,
+        { forward: 0, strafe: 0, ascend: false, descend: false },
+        dt,
+        this.pedestrianManager.pedestrians,
+        this.scene
+      );
+      if (transitSystem.isPlayerRidingTrain) {
+        const train = transitSystem.getPlayerTrainGroup();
+        this.player.heading = train.rotation.y + Math.PI / 2;
+        this.player.group.rotation.y = this.player.heading;
+        this.player.group.visible = true;
+        this.player.rig.animate(0, false, true, dt);
+        store.setVehicleStats(40, 100, 1, 2800);
+      } else {
+        this.player.group.visible = true;
+        this.cameraController.mode = 'onFoot';
+      }
     } else if (transitSystem.isPlayerFlyingHeli) {
       this.cameraController.mode = 'vehicle';
       const flightInput = {
@@ -989,12 +1107,18 @@ export class Game {
         ascend: isJump,
         descend: isSprint
       };
-      transitSystem.update(this.player.position, flightInput, dt);
+      transitSystem.update(this.player.position, flightInput, dt, this.pedestrianManager.pedestrians, this.scene);
 
       const heliSpeedKts = Math.round(transitSystem.heliVelocity.length() * 1.94);
       store.setVehicleStats(heliSpeedKts, 100, 1, 4000);
     } else {
-      transitSystem.update(this.player.position, { forward: 0, strafe: 0, ascend: false, descend: false }, dt);
+      transitSystem.update(
+        this.player.position,
+        { forward: 0, strafe: 0, ascend: false, descend: false },
+        dt,
+        this.pedestrianManager.pedestrians,
+        this.scene
+      );
 
       if (this.currentVehicle) {
         this.cameraController.mode = 'vehicle';
@@ -1020,7 +1144,7 @@ export class Game {
 
         this.currentVehicle.update(
           { throttle, brake, steer, handbrake: isHandbrake },
-          this.cityData.colliders,
+          this.collisionGrid.getNearby(this.currentVehicle.position.x, this.currentVehicle.position.z, 8),
           dt,
           this.getAllVehicles().filter((vehicle) => vehicle !== this.currentVehicle)
         );
@@ -1099,8 +1223,11 @@ export class Game {
         this.player.update(
           { forward: forwardInput, strafe: strafeInput, sprint: isSprint, jump: isJump },
           this.cameraController.yaw,
-          this.cityData.colliders,
-          dt
+          this.collisionGrid.getNearby(this.player.position.x, this.player.position.z, 4),
+          dt,
+          this.pedestrianManager.pedestrians
+            .filter((pedestrian) => !pedestrian.isDead)
+            .map((pedestrian) => pedestrian.position)
         );
       }
     }
@@ -1112,15 +1239,21 @@ export class Game {
         transitSystem.planePos,
         transitSystem.planeHeading,
         transitSystem.planeSpeed * 2.2,
-        dt
+        dt,
+        true,
+        transitSystem.planePitch
       );
     } else if (transitSystem.isPlayerRidingTrain) {
+      const train = transitSystem.getPlayerTrainGroup();
       this.cameraController.update(
-        transitSystem.trainGroup.position,
-        transitSystem.trainGroup.position,
+        this.player.position,
+        train.position,
+        train.rotation.y,
+        transitSystem.trainSpeed,
+        dt,
+        false,
         0,
-        15,
-        dt
+        true
       );
     } else if (transitSystem.isPlayerFlyingHeli) {
       this.cameraController.update(
@@ -1147,17 +1280,12 @@ export class Game {
       !transitSystem.isPlayerFlyingHeli &&
       !store.isWasted;
     const firstPersonOnFoot = isOnFoot && store.cameraViewMode === 'first_person';
-    const firstPersonDriving =
-      store.isInVehicle &&
-      !!this.currentVehicle &&
-      store.cameraViewMode === 'first_person';
     this.firstPersonViewmodelRoot.position.copy(this.cameraController.camera.position);
     this.firstPersonViewmodelRoot.quaternion.copy(this.cameraController.camera.quaternion);
     if (isOnFoot) {
       this.player.group.visible = !firstPersonOnFoot;
     }
-    this.player.rig.firstPersonArms.visible = firstPersonOnFoot || firstPersonDriving;
-    this.player.rig.setFirstPersonDriving(firstPersonDriving);
+    this.player.rig.firstPersonArms.visible = firstPersonOnFoot;
     this.player.rig.updateWatch(store.timeOfDay);
 
     // 5. Update AI Systems
@@ -1423,12 +1551,27 @@ export class Game {
     if (!this.currentVehicle && !transitSystem.isPlayerFlyingHeli && !transitSystem.isPlayerFlyingPlane && !transitSystem.isPlayerRidingTrain) {
       const planeDist = this.player.position.distanceTo(transitSystem.planePos);
       if (planeDist < 6.5) {
-        store.setInteractionPrompt('Press [E] to Pilot Luxor Jet Airliner');
+        store.setInteractionPrompt('Press [E] to pilot Luxor Jet · [F] autopilot · [G] cruise speed');
         return;
       }
-      const trainDist = this.player.position.distanceTo(transitSystem.trainGroup.position);
-      if (trainDist < 6.0) {
-        store.setInteractionPrompt('Press [E] to Board Vice Bay Metro Train');
+      const stationIndex = transitSystem.getNearbyMetroStationIndex(this.player.position);
+      if (stationIndex >= 0) {
+        const stoppedTrain = transitSystem.getTrainStoppedAtStation(stationIndex);
+        const ticketDestination = transitSystem.getMetroTicketDestinationName();
+        const arrival = Math.ceil(transitSystem.getMetroArrivalSeconds(stationIndex));
+        if (ticketDestination && stoppedTrain >= 0) {
+          store.setInteractionPrompt(
+            `Press [E] to board Line A · ticket to ${ticketDestination}`
+          );
+        } else if (ticketDestination) {
+          store.setInteractionPrompt(
+            `Ticket to ${ticketDestination} · next train in ${arrival}s`
+          );
+        } else {
+          store.setInteractionPrompt(
+            `[Q] Destination: ${transitSystem.getSelectedMetroDestinationName()} · [E] Buy ticket $25 · train ${arrival}s`
+          );
+        }
         return;
       }
       const heliDist = this.player.position.distanceTo(transitSystem.heliPos);
@@ -1437,10 +1580,18 @@ export class Game {
         return;
       }
     } else if (transitSystem.isPlayerFlyingPlane) {
-      store.setInteractionPrompt('Press [E] to Exit Jet Airliner');
+      store.setInteractionPrompt(
+        transitSystem.planePos.y > 0.8 || transitSystem.planeSpeed > 5
+          ? `[F] Autopilot ${transitSystem.isPlaneAutopilot ? 'ON' : 'OFF'} · [G] speed · [E] exit after landing`
+          : '[E] Exit Jet Airliner · [F] Autopilot · [G] cruise speed'
+      );
       return;
     } else if (transitSystem.isPlayerRidingTrain) {
-      store.setInteractionPrompt('Press [E] to Disembark Metro Train');
+      store.setInteractionPrompt(
+        transitSystem.currentTrainStationIndex >= 0
+          ? `At ${transitSystem.getMetroStationName(transitSystem.currentTrainStationIndex)} · Press [E] to exit`
+          : `Line A · Destination ${transitSystem.getMetroJourneyDestinationName() ?? 'unknown'} · doors open at stations`
+      );
       return;
     } else if (transitSystem.isPlayerFlyingHeli) {
       store.setInteractionPrompt('Press [E] to Land & Exit Helicopter');
@@ -1502,6 +1653,10 @@ export class Game {
   public destroy() {
     this.stop();
     window.removeEventListener('resize', this.onResize);
+    this.container.removeEventListener('pointerdown', this.onTouchCameraStart);
+    this.container.removeEventListener('pointermove', this.onTouchCameraMove);
+    this.container.removeEventListener('pointerup', this.onTouchCameraEnd);
+    this.container.removeEventListener('pointercancel', this.onTouchCameraEnd);
     audioManager.stopEngine();
     audioManager.stopRadio();
     if (this.renderer.domElement.parentElement) {

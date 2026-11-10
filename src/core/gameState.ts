@@ -10,6 +10,7 @@ export type PhoneAppType =
   | 'contacts'
   | 'browser'
   | 'bank'
+  | 'ammo'
   | 'jobs'
   | 'garage'
   | 'music'
@@ -52,6 +53,12 @@ export interface WeaponData {
   reserve: number;
   iconName: string;
 }
+
+export const AMMO_PACKS = {
+  pistol: { quantity: 45, price: 180 },
+  smg: { quantity: 90, price: 320 },
+  rifle: { quantity: 90, price: 420 }
+} as const;
 
 export interface MissionData {
   id: string;
@@ -291,10 +298,12 @@ export interface GameState {
   soundVolume: number;
   musicVolume: number;
   graphicsQuality: 'low' | 'medium' | 'high' | 'ultra';
+  touchMode: boolean;
   setMuted: (m: boolean) => void;
   setSoundVolume: (v: number) => void;
   setMusicVolume: (v: number) => void;
   setGraphicsQuality: (q: 'low' | 'medium' | 'high' | 'ultra') => void;
+  setTouchMode: (enabled: boolean) => void;
 
   // Interaction prompt & Notification toast
   interactionPrompt: string | null;
@@ -320,6 +329,7 @@ export interface GameState {
   isWasted: boolean;
   wastedTimer: number;
   selectWeapon: (w: WeaponType) => void;
+  purchaseAmmo: (weapon: keyof typeof AMMO_PACKS) => 'success' | 'insufficient-funds' | 'reserve-full';
   fireWeapon: () => boolean;
   reloadWeapon: () => void;
   setAiming: (aim: boolean) => void;
@@ -998,10 +1008,12 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
   soundVolume: 0.8,
   musicVolume: 0.6,
   graphicsQuality: 'high',
+  touchMode: typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches,
   setMuted: (isMuted) => set({ isMuted }),
   setSoundVolume: (soundVolume) => set({ soundVolume }),
   setMusicVolume: (musicVolume) => set({ musicVolume }),
   setGraphicsQuality: (graphicsQuality) => set({ graphicsQuality }),
+  setTouchMode: (touchMode) => set({ touchMode }),
 
   interactionPrompt: null,
   notificationToast: null,
@@ -1020,7 +1032,7 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
   setPlayerWorldTransform: (playerPos, playerHeading) => set({ playerPos, playerHeading }),
 
   // Weapons, Combat & Camera View Mode
-  currentWeapon: 'pistol',
+  currentWeapon: 'fists',
   weapons: {
     fists: {
       name: 'Unarmed / Fists',
@@ -1079,6 +1091,31 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
   helicopterInFlight: false,
 
   selectWeapon: (w) => set({ currentWeapon: w }),
+  purchaseAmmo: (weapon) => {
+    const state = get();
+    const weaponData = state.weapons[weapon];
+    const pack = AMMO_PACKS[weapon];
+    const reserveLimit = weaponData.maxClip * 20;
+    if (weaponData.reserve + pack.quantity > reserveLimit) return 'reserve-full';
+    if (state.cash < pack.price) return 'insufficient-funds';
+
+    const transaction: BankTransaction = {
+      id: Math.random().toString(36).substring(2, 9),
+      description: `${weaponData.name} ammo`,
+      amount: -pack.price,
+      type: 'debit',
+      date: 'Just now'
+    };
+    set({
+      cash: state.cash - pack.price,
+      weapons: {
+        ...state.weapons,
+        [weapon]: { ...weaponData, reserve: weaponData.reserve + pack.quantity }
+      },
+      transactions: [transaction, ...state.transactions]
+    });
+    return 'success';
+  },
   fireWeapon: () => {
     const { currentWeapon, weapons } = get();
     const cur = weapons[currentWeapon];
@@ -1160,6 +1197,7 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
     playerPos: state.playerPos,
     playerHeading: state.playerHeading,
     graphicsQuality: state.graphicsQuality,
+    touchMode: state.touchMode,
     soundVolume: state.soundVolume,
     musicVolume: state.musicVolume,
     isMuted: state.isMuted,

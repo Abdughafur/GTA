@@ -27,7 +27,10 @@ export class CameraController {
     vehiclePos: THREE.Vector3 | null,
     vehicleHeading: number,
     vehicleSpeed: number,
-    dt: number
+    dt: number,
+    isAirplane = false,
+    airplanePitch = 0,
+    isTrain = false
   ) {
     const store = useGameStore.getState();
     const viewMode: CameraViewMode = store.cameraViewMode;
@@ -51,26 +54,37 @@ export class CameraController {
 
     if (this.mode === 'vehicle' && vehiclePos) {
       // --- VEHICLE CAMERA MODES ---
-      if (viewMode === 'first_person') {
+      if (viewMode === 'first_person' || isTrain) {
         // 1. FIRST-PERSON INTERIOR COCKPIT VIEW ("inside card")
-        // Position camera directly in driver's seat looking forward through windshield
+        // Keep the seat position fixed while allowing the view direction to turn.
         const viewHeading = vehicleHeading + this.vehicleLookYawOffset;
-        const fwdDir = new THREE.Vector3(Math.sin(viewHeading), 0, Math.cos(viewHeading));
+        const fwdDir = new THREE.Vector3(Math.sin(vehicleHeading), 0, Math.cos(vehicleHeading));
         const rightDir = new THREE.Vector3(Math.cos(vehicleHeading), 0, -Math.sin(vehicleHeading));
+        const viewDir = new THREE.Vector3(Math.sin(viewHeading), 0, Math.cos(viewHeading));
 
-        const cockpitPos = vehiclePos.clone()
-          .add(new THREE.Vector3(0, 1.18, 0))
-          .add(rightDir.clone().multiplyScalar(-0.35))
-          .add(fwdDir.clone().multiplyScalar(0.2));
+        const cockpitPos = isTrain
+          ? playerPos.clone().add(new THREE.Vector3(0, 1.28, 0))
+          : isAirplane
+          ? vehiclePos.clone()
+            .add(new THREE.Vector3(0, 2.12, 0))
+            .add(fwdDir.clone().multiplyScalar(6.7))
+          : vehiclePos.clone()
+            .add(new THREE.Vector3(0, 1.18, 0))
+            .add(rightDir.clone().multiplyScalar(-0.35))
+            .add(fwdDir.clone().multiplyScalar(0.2));
 
         this.camera.position.copy(cockpitPos);
 
+        const lookDirection = isAirplane
+          ? new THREE.Vector3(0, -Math.sin(airplanePitch), Math.cos(airplanePitch))
+            .applyAxisAngle(new THREE.Vector3(0, 1, 0), viewHeading)
+          : viewDir;
         const lookTarget = cockpitPos.clone()
-          .add(fwdDir.clone().multiplyScalar(20))
-          .add(new THREE.Vector3(0, -this.pitch * 3, 0));
+          .add(lookDirection.multiplyScalar(isAirplane ? 80 : 20))
+          .add(new THREE.Vector3(0, isAirplane ? -this.pitch * 1.5 : -this.pitch * 3, 0));
 
         this.camera.lookAt(lookTarget);
-        this.camera.fov = 75;
+        this.camera.fov = isAirplane ? 82 : 75;
         this.camera.updateProjectionMatrix();
         return;
       }

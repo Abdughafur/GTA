@@ -17,7 +17,8 @@ import {
   Music,
   CloudSun,
   Camera,
-  Zap
+  Zap,
+  Crosshair
 } from 'lucide-react';
 import { PhoneMap } from './phone/PhoneMap';
 import { PhoneMessages } from './phone/PhoneMessages';
@@ -30,6 +31,7 @@ import { PhoneGarage } from './phone/PhoneGarage';
 import { PhoneMusic } from './phone/PhoneMusic';
 import { PhoneWeather } from './phone/PhoneWeather';
 import { PhoneCamera } from './phone/PhoneCamera';
+import { PhoneAmmo } from './phone/PhoneAmmo';
 import { audioManager } from '../core/AudioManager';
 
 interface SmartphoneProps {
@@ -113,6 +115,12 @@ export const Smartphone: React.FC<SmartphoneProps> = ({ onAcceptMission, onSpawn
       color: 'bg-gradient-to-tr from-red-700 to-rose-500'
     },
     {
+      id: 'ammo' as PhoneAppType,
+      name: 'Ammu-Nation',
+      icon: <Crosshair className="w-5 h-5 text-white" />,
+      color: 'bg-gradient-to-tr from-lime-700 to-emerald-500'
+    },
+    {
       id: 'browser' as PhoneAppType,
       name: 'Safari',
       icon: <Globe className="w-5 h-5 text-white" />,
@@ -157,7 +165,12 @@ export const Smartphone: React.FC<SmartphoneProps> = ({ onAcceptMission, onSpawn
         <div className="ios-screen">
           <div className="ios-statusbar">
             <span className="ios-status-time">{formattedTime}</span>
-            <div className="ios-dynamic-island" aria-label="Dynamic Island">
+            <div
+              className={`ios-dynamic-island ${
+                isPhoneCharging || activeJob !== 'none' ? 'ios-dynamic-island-active' : ''
+              }`}
+              aria-label="Dynamic Island"
+            >
               <span className="ios-island-camera" />
               {isPhoneCharging && <Zap className="ios-island-charge" />}
               {activeJob !== 'none' && <span className="ios-island-duty">DUTY</span>}
@@ -233,6 +246,7 @@ export const Smartphone: React.FC<SmartphoneProps> = ({ onAcceptMission, onSpawn
                 {activePhoneApp === 'contacts' && <PhoneContacts />}
                 {activePhoneApp === 'browser' && <PhoneBrowser onSpawnCar={onSpawnCar} />}
                 {activePhoneApp === 'bank' && <PhoneBank />}
+                {activePhoneApp === 'ammo' && <PhoneAmmo />}
                 {activePhoneApp === 'jobs' && <PhoneJobs onDispatchJob={onDispatchJob || (() => {})} />}
                 {activePhoneApp === 'garage' && <PhoneGarage onSpawnCar={onSpawnCar} />}
                 {activePhoneApp === 'music' && <PhoneMusic />}

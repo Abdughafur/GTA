@@ -1,9 +1,12 @@
 import * as THREE from 'three';
 import { Vehicle, VehicleConfig } from '../vehicles/Vehicle';
 import { CollisionBox } from '../world/CityGenerator';
+import { CollisionGrid } from '../world/CollisionGrid';
 import { audioManager } from '../core/AudioManager';
 import { useGameStore } from '../core/gameState';
 import { CharacterRig, modelFactory } from '../world/ModelFactory';
+
+const POLICE_WEAPON_RANGE = 30;
 
 export class PoliceOfficer {
   public group: THREE.Group;
@@ -16,17 +19,19 @@ export class PoliceOfficer {
   public isDeployed = false;
   private shootTimer = 0;
   private isUsingCover = false;
-  private gunMesh: THREE.Mesh;
+  private gunMesh: THREE.Group;
   private flashLight: THREE.PointLight;
+  private muzzleFlash: THREE.Mesh;
+  private muzzleFlashTimer = 0;
 
   constructor(startPos: THREE.Vector3) {
-    // Navy blue uniform (0x1e3a8a) with police cap
-    this.rig = modelFactory.createCharacter(0x1e3a8a, 0xf6d8ae, {
+    this.rig = modelFactory.createCharacter(0x172b46, 0xf6d8ae, {
       pantsColor: 0x0f172a,
       shoesColor: 0x09090b,
       hairColor: 0x18181b,
       glasses: false,
-      hat: true,
+      hat: false,
+      hairStyle: 4,
       watch: true
     });
     this.group = this.rig.group;
@@ -34,16 +39,82 @@ export class PoliceOfficer {
     this.position.copy(startPos);
     this.group.visible = false;
 
-    // Attach Police Pistol
-    const gunMat = new THREE.MeshStandardMaterial({ color: 0x09090b, metalness: 0.85, roughness: 0.2 });
-    this.gunMesh = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.08, 0.2), gunMat);
+    const uniformTrim = new THREE.MeshStandardMaterial({ color: 0x0b1728, roughness: 0.72 });
+    const badgeMaterial = new THREE.MeshStandardMaterial({ color: 0xd6b85d, metalness: 0.72, roughness: 0.3 });
+    const patchMaterial = new THREE.MeshStandardMaterial({ color: 0x263e5c, roughness: 0.75 });
+    const belt = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.09, 0.3), uniformTrim);
+    belt.position.set(0, 0.99, 0);
+    this.group.add(belt);
+
+    const vest = new THREE.Mesh(
+      new THREE.BoxGeometry(0.38, 0.4, 0.035),
+      new THREE.MeshStandardMaterial({ color: 0x203754, roughness: 0.8 })
+    );
+    vest.position.set(0, 1.35, 0.155);
+    this.group.add(vest);
+
+    const tie = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.22, 0.025), uniformTrim);
+    tie.position.set(0, 1.48, 0.18);
+    this.group.add(tie);
+
+    const badge = new THREE.Mesh(new THREE.CircleGeometry(0.065, 6), badgeMaterial);
+    badge.position.set(-0.115, 1.47, 0.181);
+    this.group.add(badge);
+
+    for (const side of [-1, 1]) {
+      const shoulderPatch = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.12, 0.16), patchMaterial);
+      shoulderPatch.position.set(side * 0.32, 1.51, 0.005);
+      this.group.add(shoulderPatch);
+
+      const beltPouch = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.13, 0.12), uniformTrim);
+      beltPouch.position.set(side * 0.25, 0.98, 0.04);
+      this.group.add(beltPouch);
+    }
+
+    const radio = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.17, 0.07), uniformTrim);
+    radio.position.set(-0.25, 1.56, 0.02);
+    this.group.add(radio);
+
+    const capMaterial = new THREE.MeshStandardMaterial({ color: 0x101e32, roughness: 0.68 });
+    const cap = new THREE.Group();
+    const crown = new THREE.Mesh(new THREE.SphereGeometry(0.19, 12, 8), capMaterial);
+    crown.scale.set(1, 0.45, 1);
+    crown.position.y = 1.94;
+    const brim = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.035, 0.25), capMaterial);
+    brim.position.set(0, 1.91, 0.13);
+    const capBadge = new THREE.Mesh(new THREE.CircleGeometry(0.045, 6), badgeMaterial);
+    capBadge.position.set(0, 1.94, 0.188);
+    cap.add(crown, brim, capBadge);
+    this.group.add(cap);
+
+    const gunMat = new THREE.MeshStandardMaterial({ color: 0x111820, metalness: 0.82, roughness: 0.24 });
+    this.gunMesh = new THREE.Group();
+    const slide = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.075, 0.22), gunMat);
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.052, 0.14, 0.075), uniformTrim);
+    grip.position.set(0, -0.09, -0.025);
+    grip.rotation.x = -0.16;
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.11, 8), gunMat);
+    barrel.rotation.x = Math.PI / 2;
+    barrel.position.z = 0.14;
+    this.gunMesh.add(slide, grip, barrel);
     this.gunMesh.position.set(0, -0.42, 0.1);
     this.gunMesh.rotation.x = Math.PI / 2;
     this.rig.rightArm.add(this.gunMesh);
 
-    // Muzzle Flash Light
-    this.flashLight = new THREE.PointLight(0xf59e0b, 0, 8);
-    this.flashLight.position.set(0, 0, 0.15);
+    const flashMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffe18a,
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false
+    });
+    this.muzzleFlash = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), flashMaterial);
+    this.muzzleFlash.position.set(0, 0, 0.22);
+    this.muzzleFlash.scale.set(0.7, 0.7, 2.4);
+    this.muzzleFlash.visible = false;
+    this.gunMesh.add(this.muzzleFlash);
+
+    this.flashLight = new THREE.PointLight(0xffc45c, 0, 4, 2);
+    this.flashLight.position.copy(this.muzzleFlash.position);
     this.gunMesh.add(this.flashLight);
   }
 
@@ -82,6 +153,10 @@ export class PoliceOfficer {
   public update(playerPos: THREE.Vector3, colliders: CollisionBox[], dt: number, onShootPlayer: (from: THREE.Vector3) => void) {
     if (!this.isDeployed || this.isDead) return;
 
+    this.muzzleFlashTimer = Math.max(0, this.muzzleFlashTimer - dt);
+    this.muzzleFlash.visible = this.muzzleFlashTimer > 0;
+    this.flashLight.intensity = this.muzzleFlashTimer > 0 ? 3.5 : 0;
+
     const toPlayer = new THREE.Vector3().subVectors(playerPos, this.position);
     const dist = toPlayer.length();
 
@@ -118,7 +193,7 @@ export class PoliceOfficer {
 
     // Shooting AI cycle
     this.shootTimer -= dt;
-    if (this.shootTimer <= 0 && dist < 35) {
+    if (this.shootTimer <= 0 && dist <= POLICE_WEAPON_RANGE) {
       this.shootTimer = 1.4 + Math.random() * 1.2;
       this.fireWeapon(playerPos, onShootPlayer);
     }
@@ -126,13 +201,12 @@ export class PoliceOfficer {
 
   private fireWeapon(playerPos: THREE.Vector3, onShootPlayer: (from: THREE.Vector3) => void) {
     audioManager.playPistolShot();
-    this.flashLight.intensity = 2.5;
-    setTimeout(() => {
-      this.flashLight.intensity = 0;
-    }, 80);
+    this.muzzleFlashTimer = 0.075;
+    this.muzzleFlash.visible = true;
+    this.flashLight.intensity = 3.5;
 
     const muzzleWorld = new THREE.Vector3();
-    this.gunMesh.getWorldPosition(muzzleWorld);
+    this.muzzleFlash.getWorldPosition(muzzleWorld);
     onShootPlayer(muzzleWorld);
   }
 }
@@ -180,15 +254,18 @@ export class PoliceAI {
 
     // Check if officers should exit car and shoot player
     this.deployCheckTimer += dt;
-    if (!this.hasDeployedOfficers && distToPlayer < 18) {
+    if (!this.vehicle.isPlayerDriving && !this.hasDeployedOfficers && distToPlayer < 18) {
       this.hasDeployedOfficers = true;
       this.vehicle.speed = 0;
+      this.vehicle.velocity.set(0, 0, 0);
+      this.vehicle.isParked = true;
       this.vehicle.openDoor('left');
       this.vehicle.openDoor('right');
       this.officersExitDelay = 0.55;
     }
 
     if (!this.hasDeployedOfficers) {
+      if (this.vehicle.isPlayerDriving) return;
       // Cruiser pursuit driving
       const targetHeading = Math.atan2(toPlayer.x, toPlayer.z);
       let diff = targetHeading - this.vehicle.heading;
@@ -202,8 +279,9 @@ export class PoliceAI {
 
       this.vehicle.update({ throttle, brake, steer, handbrake }, colliders, dt, otherVehicles);
     } else {
-      // Cruiser is parked, brake held
-      this.vehicle.update({ throttle: 0, brake: 1.0, steer: 0, handbrake: true }, colliders, dt, otherVehicles);
+      if (!this.vehicle.isPlayerDriving) {
+        this.vehicle.update({ throttle: 0, brake: 1.0, steer: 0, handbrake: true }, colliders, dt, otherVehicles);
+      }
 
       if (this.officersExitDelay > 0) {
         this.officersExitDelay = Math.max(0, this.officersExitDelay - dt);
@@ -233,15 +311,14 @@ export class PoliceAI {
 
 export class PoliceSystem {
   public cruisers: PoliceAI[] = [];
-  public bulletTracers: { line: THREE.Line; age: number }[] = [];
   private scene: THREE.Scene;
-  private colliders: CollisionBox[];
+  private collisionGrid: CollisionGrid;
   private lastWantedLevel = 0;
   private heatTimer = 0;
 
-  constructor(scene: THREE.Scene, colliders: CollisionBox[]) {
+  constructor(scene: THREE.Scene, collisionGrid: CollisionGrid) {
     this.scene = scene;
-    this.colliders = colliders;
+    this.collisionGrid = collisionGrid;
   }
 
   public update(playerPos: THREE.Vector3, isPlayerInVehicle: boolean, dt: number, otherVehicles: Vehicle[] = []) {
@@ -274,29 +351,19 @@ export class PoliceSystem {
     }
 
     while (this.cruisers.length > targetCount) {
-      const removed = this.cruisers.pop();
-      if (removed) {
-        removed.cleanup(this.scene);
-      }
+      const removableIndex = this.cruisers.findIndex((cruiser) => !cruiser.vehicle.isPlayerDriving);
+      if (removableIndex < 0) break;
+      const [removed] = this.cruisers.splice(removableIndex, 1);
+      removed.cleanup(this.scene);
     }
 
     if (wantedLevel === 0) return;
 
     // Callback when police officer shoots at player
     const handleOfficerShot = (fromPos: THREE.Vector3) => {
-      // Bullet tracer from officer to player
-      const tracerGeo = new THREE.BufferGeometry().setFromPoints([
-        fromPos,
-        playerPos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.6, 1.4, (Math.random() - 0.5) * 0.6))
-      ]);
-      const tracerMat = new THREE.LineBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.9 });
-      const tracerLine = new THREE.Line(tracerGeo, tracerMat);
-      this.scene.add(tracerLine);
-      this.bulletTracers.push({ line: tracerLine, age: 0 });
-
-      // Hit chance based on distance
       const dist = fromPos.distanceTo(playerPos);
-      const hitProb = Math.max(0.2, 0.75 - (dist / 35) * 0.5);
+      if (dist > POLICE_WEAPON_RANGE) return;
+      const hitProb = Math.max(0.08, 0.72 - (dist / POLICE_WEAPON_RANGE) * 0.58);
       if (Math.random() < hitProb) {
         // Player takes bullet damage!
         store.damagePlayer(11);
@@ -310,22 +377,16 @@ export class PoliceSystem {
       const otherPoliceVehicles = this.cruisers
         .filter((other) => other !== cruiser)
         .map((other) => other.vehicle);
-      cruiser.update(playerPos, isPlayerInVehicle, this.colliders, dt, handleOfficerShot, [
-        ...otherPoliceVehicles,
-        ...otherVehicles
-      ]);
+      cruiser.update(
+        playerPos,
+        isPlayerInVehicle,
+        this.collisionGrid.getNearby(cruiser.vehicle.position.x, cruiser.vehicle.position.z, 60),
+        dt,
+        handleOfficerShot,
+        [...otherPoliceVehicles, ...otherVehicles]
+      );
       const d = cruiser.vehicle.position.distanceTo(playerPos);
       if (d < minCruiserDist) minCruiserDist = d;
-    }
-
-    // Update and fade bullet tracers
-    for (let i = this.bulletTracers.length - 1; i >= 0; i--) {
-      const tr = this.bulletTracers[i];
-      tr.age += dt;
-      if (tr.age > 0.09) {
-        this.scene.remove(tr.line);
-        this.bulletTracers.splice(i, 1);
-      }
     }
 
     // Line of sight & heat cooldown
@@ -349,10 +410,6 @@ export class PoliceSystem {
       cruiser.cleanup(this.scene);
     }
     this.cruisers = [];
-    for (const tr of this.bulletTracers) {
-      this.scene.remove(tr.line);
-    }
-    this.bulletTracers = [];
     audioManager.setSiren(false);
   }
 }

@@ -523,3 +523,543 @@
     width: calc(100vw - 16px);
   }
 }
+
+.ios-device {
+  width: min(390px, calc(100vw - 24px));
+  height: min(790px, calc(100dvh - 24px));
+  min-height: 0;
+  padding: 6px;
+  border-color: rgba(235, 239, 248, 0.62);
+  border-radius: 54px;
+  background:
+    linear-gradient(118deg, rgba(255,255,255,0.64), transparent 9%, transparent 83%, rgba(255,255,255,0.38)),
+    linear-gradient(145deg, #555b65 0%, #171a20 18%, #090b10 54%, #343942 100%);
+  box-shadow:
+    0 34px 100px rgba(0,0,0,0.66),
+    0 0 0 1px rgba(255,255,255,0.18),
+    inset 0 0 0 1px rgba(0,0,0,0.8);
+}
+
+.ios-screen {
+  border-color: rgba(255,255,255,0.14);
+  border-radius: 48px;
+  background: #080a0f;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.035);
+}
+
+.ios-statusbar {
+  height: 54px;
+  flex-basis: 54px;
+  padding: 2px 24px 0;
+  background: linear-gradient(180deg, rgba(5,7,12,0.91), rgba(8,10,16,0.46));
+  backdrop-filter: blur(26px) saturate(1.5);
+  -webkit-backdrop-filter: blur(26px) saturate(1.5);
+}
+
+.ios-dynamic-island {
+  top: 9px;
+  width: 118px;
+  height: 34px;
+  gap: 9px;
+  border: 1px solid rgba(255,255,255,0.11);
+  border-radius: 22px;
+  box-shadow: 0 2px 9px rgba(0,0,0,0.8), inset 0 1px 0 rgba(255,255,255,0.07);
+  transition: width 240ms cubic-bezier(0.2,0.8,0.2,1), background 200ms ease;
+}
+
+.ios-dynamic-island-active {
+  width: 148px;
+  background: linear-gradient(110deg, #050607, #101317 55%, #050607);
+}
+
+.ios-island-camera {
+  width: 9px;
+  height: 9px;
+  box-shadow: 0 0 0 2px rgba(53,78,108,0.18), inset 0 0 4px rgba(86,145,204,0.55);
+}
+
+.ios-home {
+  gap: 18px;
+  padding: 12px 20px 14px;
+  background-image:
+    radial-gradient(ellipse at 18% 24%, rgba(99,165,255,0.22), transparent 34%),
+    radial-gradient(ellipse at 84% 61%, rgba(183,112,255,0.2), transparent 38%),
+    radial-gradient(ellipse at 52% 4%, rgba(255,255,255,0.16), transparent 34%),
+    linear-gradient(155deg, #101a2d 0%, #151b30 49%, #090c15 100%);
+}
+
+.ios-wallpaper-sunset {
+  background-image:
+    radial-gradient(ellipse at 50% 12%, rgba(255,171,125,0.44), transparent 40%),
+    radial-gradient(ellipse at 10% 66%, rgba(222,94,156,0.2), transparent 38%),
+    linear-gradient(160deg, #462639 0%, #272039 56%, #0c101a 100%);
+}
+
+.ios-wallpaper-neon {
+  background-image:
+    radial-gradient(ellipse at 18% 14%, rgba(217,70,239,0.32), transparent 38%),
+    radial-gradient(ellipse at 84% 68%, rgba(6,182,212,0.28), transparent 40%),
+    linear-gradient(155deg, #21152f, #101827 78%);
+}
+
+.ios-wallpaper-cyber {
+  background-image:
+    radial-gradient(ellipse at 75% 12%, rgba(16,185,129,0.32), transparent 42%),
+    radial-gradient(ellipse at 18% 72%, rgba(34,211,238,0.16), transparent 37%),
+    linear-gradient(155deg, #123b3b, #142a31 55%, #0c111a);
+}
+
+.ios-wallpaper-downtown {
+  background-image:
+    radial-gradient(ellipse at 50% 12%, rgba(59,130,246,0.36), transparent 45%),
+    radial-gradient(ellipse at 80% 75%, rgba(129,140,248,0.18), transparent 40%),
+    linear-gradient(155deg, #172b50, #17233c 54%, #0c1019);
+}
+
+.ios-date {
+  font-size: 10px;
+  letter-spacing: 0.19em;
+  text-shadow: 0 1px 10px rgba(0,0,0,0.42);
+}
+
+.ios-clock {
+  margin: 0 0 5px;
+  font-size: clamp(58px, 16vw, 74px);
+  font-weight: 230;
+  letter-spacing: -0.085em;
+  text-shadow: 0 8px 36px rgba(0,0,0,0.2);
+}
+
+.ios-weather {
+  display: inline-flex;
+  padding: 7px 12px;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 20px;
+  background: rgba(255,255,255,0.09);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.1);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.ios-app-grid {
+  grid-auto-rows: minmax(72px, 1fr);
+  gap: 10px 5px;
+}
+
+.ios-app,
+.ios-dock-app {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ios-app:focus-visible,
+.ios-dock-app:focus-visible,
+.ios-home-button:focus-visible,
+.ios-close-button:focus-visible,
+.ios-home-indicator:focus-visible {
+  outline: 2px solid rgba(255,255,255,0.92);
+  outline-offset: 3px;
+}
+
+.ios-app-icon,
+.ios-dock-app {
+  width: 54px;
+  height: 54px;
+  flex-basis: 54px;
+  border: 1px solid rgba(255,255,255,0.24);
+  border-radius: 17px;
+  box-shadow: 0 7px 18px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.32);
+}
+
+.ios-app-icon svg,
+.ios-dock-app svg {
+  width: 24px;
+  height: 24px;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.16));
+}
+
+.ios-app-name {
+  font-size: 10px;
+  font-weight: 560;
+  text-shadow: 0 1px 5px rgba(0,0,0,0.88);
+}
+
+.ios-dock {
+  min-height: 72px;
+  flex-basis: 72px;
+  padding: 9px 10px;
+  border-color: rgba(255,255,255,0.2);
+  border-radius: 26px;
+  background: rgba(238,242,250,0.16);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.18), 0 8px 24px rgba(0,0,0,0.12);
+  backdrop-filter: blur(32px) saturate(1.65);
+  -webkit-backdrop-filter: blur(32px) saturate(1.65);
+}
+
+.ios-dock-app {
+  width: 49px;
+  height: 49px;
+  flex-basis: 49px;
+}
+
+.ios-app-screen {
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(104,125,164,0.08), transparent 44%),
+    #090c12;
+}
+
+.ios-app-screen .bg-slate-950 {
+  background-color: #0a0d13;
+}
+
+.ios-app-screen .bg-slate-900 {
+  background-color: rgba(255,255,255,0.045);
+}
+
+.ios-app-screen [class*="border-slate-800"],
+.ios-app-screen [class*="border-slate-700"] {
+  border-color: rgba(255,255,255,0.09);
+}
+
+.ios-app-screen button {
+  transition: transform 150ms ease, filter 150ms ease, background-color 150ms ease;
+}
+
+.ios-app-screen button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.ios-app-screen button:disabled {
+  cursor: not-allowed;
+  filter: saturate(0.45);
+  opacity: 0.58;
+}
+
+.ios-bottom-bar {
+  height: 47px;
+  flex-basis: 47px;
+  padding-bottom: 5px;
+  background: linear-gradient(180deg, rgba(7,9,14,0.94), #07090e);
+}
+
+.ios-home-button,
+.ios-close-button {
+  width: 30px;
+  height: 30px;
+  border-color: rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.085);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.ios-home-indicator {
+  width: 112px;
+  height: 5px;
+  background: rgba(255,255,255,0.9);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+}
+
+.ammo-store {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  color: #f5f7fb;
+  background:
+    radial-gradient(ellipse at 85% 0%, rgba(88,190,130,0.12), transparent 37%),
+    #0a0d13;
+}
+
+.ammo-store-header {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 14px;
+  padding: 17px 17px 14px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  background: linear-gradient(145deg, rgba(24,46,38,0.82), rgba(10,14,19,0.92));
+}
+
+.ammo-store-title-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.ammo-store-mark,
+.ammo-product-icon {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(134,239,172,0.2);
+  color: #a7f3c1;
+  background: linear-gradient(145deg, rgba(34,197,94,0.22), rgba(16,185,129,0.08));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.12);
+}
+
+.ammo-store-mark {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+}
+
+.ammo-store-mark svg {
+  width: 20px;
+  height: 20px;
+}
+
+.ammo-store-eyebrow,
+.ammo-wallet > span,
+.ammo-section-label,
+.ammo-reserve-label {
+  color: #8d9aab;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.13em;
+}
+
+.ammo-store-title-row h1 {
+  margin: 2px 0 0;
+  color: #f5f7fb;
+  font-size: 21px;
+  font-weight: 720;
+  letter-spacing: -0.04em;
+}
+
+.ammo-wallet {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border: 1px solid rgba(255,255,255,0.09);
+  border-radius: 14px;
+  background: rgba(255,255,255,0.045);
+}
+
+.ammo-wallet strong {
+  color: #a7f3c1;
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ammo-store-content {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 13px;
+}
+
+.ammo-store-banner {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin-bottom: 17px;
+  padding: 12px;
+  border: 1px solid rgba(134,239,172,0.13);
+  border-radius: 16px;
+  background: linear-gradient(110deg, rgba(34,197,94,0.1), rgba(255,255,255,0.025));
+}
+
+.ammo-banner-icon {
+  display: flex;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 11px;
+  color: #a7f3c1;
+  background: rgba(34,197,94,0.14);
+}
+
+.ammo-banner-icon svg {
+  width: 17px;
+  height: 17px;
+}
+
+.ammo-store-banner strong {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ammo-store-banner p {
+  margin: 3px 0 0;
+  color: #a3adba;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.ammo-section-label {
+  display: flex;
+  justify-content: space-between;
+  margin: 0 2px 9px;
+}
+
+.ammo-product {
+  --ammo-accent: #60a5fa;
+  margin-bottom: 10px;
+  padding: 12px;
+  border: 1px solid rgba(255,255,255,0.09);
+  border-radius: 17px;
+  background: linear-gradient(145deg, rgba(255,255,255,0.065), rgba(255,255,255,0.025));
+  box-shadow: 0 5px 16px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.045);
+}
+
+.ammo-accent-blue { --ammo-accent: #7dd3fc; }
+.ammo-accent-violet { --ammo-accent: #c4b5fd; }
+.ammo-accent-amber { --ammo-accent: #fcd34d; }
+
+.ammo-product-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ammo-product-icon {
+  width: 39px;
+  height: 39px;
+  border-color: color-mix(in srgb, var(--ammo-accent) 25%, transparent);
+  border-radius: 13px;
+  color: var(--ammo-accent);
+  background: color-mix(in srgb, var(--ammo-accent) 11%, transparent);
+}
+
+.ammo-product-icon svg {
+  width: 19px;
+  height: 19px;
+}
+
+.ammo-product-info {
+  min-width: 0;
+  flex: 1;
+}
+
+.ammo-product-info h2 {
+  overflow: hidden;
+  margin: 0;
+  color: #f3f5f8;
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ammo-product-info p {
+  margin: 3px 0 0;
+  color: #8793a3;
+  font-size: 9px;
+}
+
+.ammo-price {
+  color: #a7f3c1;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ammo-reserve {
+  margin-top: 12px;
+}
+
+.ammo-reserve-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 8px;
+  letter-spacing: 0.08em;
+}
+
+.ammo-reserve-label > span:last-child {
+  color: #d3dae3;
+  font-variant-numeric: tabular-nums;
+}
+
+.ammo-reserve-label i {
+  color: #758193;
+  font-style: normal;
+}
+
+.ammo-reserve-track {
+  height: 4px;
+  margin-top: 6px;
+  overflow: hidden;
+  border-radius: 5px;
+  background: rgba(255,255,255,0.09);
+}
+
+.ammo-reserve-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--ammo-accent), #a7f3c1);
+  transition: width 240ms ease;
+}
+
+.ammo-product-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 11px;
+}
+
+.ammo-pack-quantity {
+  color: #b7c1ce;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.ammo-buy-button {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 11px;
+  border: 1px solid rgba(167,243,193,0.22);
+  border-radius: 11px;
+  color: #eafff0;
+  background: linear-gradient(135deg, #14834b, #0d6940);
+  box-shadow: 0 3px 10px rgba(5,80,42,0.2), inset 0 1px 0 rgba(255,255,255,0.12);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: filter 140ms ease, transform 140ms ease;
+}
+
+.ammo-buy-button:hover:not(:disabled) {
+  filter: brightness(1.14);
+}
+
+.ammo-buy-button svg {
+  width: 13px;
+  height: 13px;
+}
+
+.ammo-store-footnote {
+  margin: 12px 2px 4px;
+  color: #748093;
+  font-size: 9px;
+  text-align: center;
+}
+
+@media (max-height: 620px) {
+  .ios-device {
+    height: calc(100dvh - 20px);
+  }
+
+  .ios-statusbar {
+    height: 46px;
+    flex-basis: 46px;
+  }
+
+  .ios-app-icon {
+    width: 44px;
+    height: 44px;
+    flex-basis: 44px;
+  }
+
+  .ios-dock-app {
+    width: 42px;
+    height: 42px;
+    flex-basis: 42px;
+  }
+}

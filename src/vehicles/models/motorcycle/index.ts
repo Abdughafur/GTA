@@ -13,10 +13,24 @@ export function buildMotorcycle(color: number): VehicleMeshRig {
     width: 0.9, length: 2.55, height: 1.55, wheelBase: 1.75, trackWidth: 0.72, wheelRadius: 0.38
   });
   const { body, bodyMaterial, trimMaterial, chromeMaterial } = ctx;
-  addBox(ctx, body, [0.48, 0.42, 1.0], [0, 0.9, 0.05], bodyMaterial);
-  addBox(ctx, body, [0.52, 0.55, 0.62], [0, 1.18, 0.48], ctx.glassMaterial);
-  addBox(ctx, body, [0.42, 0.14, 0.42], [0, 1.48, 0.38], bodyMaterial);
-  addBox(ctx, body, [0.34, 0.16, 0.56], [0, 0.78, -0.42], ctx.interiorMaterial);
+  const tank = new THREE.Mesh(new THREE.SphereGeometry(0.5, 16, 12), bodyMaterial);
+  tank.scale.set(0.52, 0.47, 0.95);
+  tank.position.set(0, 1.02, 0.02);
+  body.add(tank);
+
+  const frontFairing = new THREE.Mesh(new THREE.SphereGeometry(0.5, 16, 12), bodyMaterial);
+  frontFairing.scale.set(0.48, 0.72, 0.46);
+  frontFairing.position.set(0, 1.16, 0.52);
+  body.add(frontFairing);
+
+  const seat = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.19, 0.38, 4, 10),
+    ctx.interiorMaterial
+  );
+  seat.rotation.z = Math.PI / 2;
+  seat.scale.set(1, 0.68, 0.8);
+  seat.position.set(0, 0.84, -0.45);
+  body.add(seat);
 
   const engine = new THREE.Mesh(new THREE.CylinderGeometry(0.31, 0.31, 0.48, 12), chromeMaterial);
   engine.rotation.z = Math.PI / 2;
@@ -42,10 +56,11 @@ export function buildMotorcycle(color: number): VehicleMeshRig {
   body.add(fork);
 
   const windscreen = new THREE.Mesh(
-    new THREE.BoxGeometry(0.5, 0.4, 0.08),
+    new THREE.SphereGeometry(0.5, 16, 12),
     new THREE.MeshPhysicalMaterial({ color: 0x68a1ad, roughness: 0.16, transparent: true, opacity: 0.68 })
   );
-  windscreen.position.set(0, 1.52, 0.65);
+  windscreen.scale.set(0.32, 0.46, 0.08);
+  windscreen.position.set(0, 1.5, 0.66);
   body.add(windscreen);
   addWheels(ctx, [[0, 0.89], [0, -0.86]]);
 

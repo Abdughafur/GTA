@@ -43,6 +43,7 @@ import { getDistrictName } from '../world/CityGenerator';
 interface HUDProps {
   onToggleVehicle: () => void;
   onTouchInput: (key: string, value: number | boolean) => void;
+  onContextAction: () => void;
   onPause: () => void;
   onShoot?: () => void;
   onAimToggle?: () => void;
@@ -52,6 +53,7 @@ interface HUDProps {
 export const HUD: React.FC<HUDProps> = ({
   onToggleVehicle,
   onTouchInput,
+  onContextAction,
   onPause,
   onShoot,
   onAimToggle,
@@ -100,6 +102,7 @@ export const HUD: React.FC<HUDProps> = ({
   const isInTrain = useGameStore((s) => s.isInTrain);
   const isCarjacking = useGameStore((s) => s.isCarjacking);
   const isWasted = useGameStore((s) => s.isWasted);
+  const touchMode = useGameStore((s) => s.touchMode);
 
   const activeMission = useGameStore((s) => s.activeMission);
   const missionTimer = useGameStore((s) => s.missionTimer);
@@ -150,6 +153,21 @@ export const HUD: React.FC<HUDProps> = ({
   };
 
   const activeWep = weapons[currentWeapon];
+  const holdControl = (key: string, activeValue: number | boolean, inactiveValue: number | boolean) => ({
+    onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      onTouchInput(key, activeValue);
+    },
+    onPointerUp: (event: React.PointerEvent<HTMLButtonElement>) => {
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      onTouchInput(key, inactiveValue);
+    },
+    onPointerCancel: () => onTouchInput(key, inactiveValue),
+    onLostPointerCapture: () => onTouchInput(key, inactiveValue)
+  });
 
   return (
     <div className="fixed inset-0 pointer-events-none z-30 select-none flex flex-col justify-between p-3 sm:p-5 overflow-hidden">
@@ -781,7 +799,7 @@ export const HUD: React.FC<HUDProps> = ({
         </div>
 
         {/* Bottom-Center / Right: Shoot / Aim Touch Controls & Vehicle Dashboard */}
-        <div className="flex items-end gap-3 pointer-events-auto">
+        <div className={`flex items-end gap-3 pointer-events-auto ${touchMode ? 'max-sm:hidden' : ''}`}>
           {/* Quick On-Screen Shoot & Aim Buttons (works with mouse click or touch on mobile) */}
           <div className="flex items-center gap-1.5 rounded-md border border-white/15 bg-black/55 p-1.5 backdrop-blur-md">
             <button
@@ -833,6 +851,39 @@ export const HUD: React.FC<HUDProps> = ({
                 <div className="text-[10px] font-mono font-bold text-amber-400 mt-0.5">
                   {vehicleSpeed === 0 ? 'N' : `D${vehicleGear}`}
                 </div>
+
+                {touchMode && !isPhoneOpen && !isInventoryOpen && !isWasted && (
+                  <div className="fixed inset-x-0 bottom-4 z-40 flex items-end justify-between px-3 pointer-events-none sm:bottom-5 sm:px-5">
+                    <div className="pointer-events-auto mb-40 flex flex-col items-center gap-1">
+                      <div className="grid grid-cols-3 grid-rows-3 gap-1">
+                        <span />
+                        <button {...holdControl('forward', 1, 0)} aria-label="Move forward" className="h-12 w-12 rounded-xl border border-white/25 bg-slate-950/75 text-xl font-black text-white shadow-lg active:bg-sky-500/80 touch-none">▲</button>
+                        <span />
+                        <button {...holdControl('left', 1, 0)} aria-label="Move left" className="h-12 w-12 rounded-xl border border-white/25 bg-slate-950/75 text-xl font-black text-white shadow-lg active:bg-sky-500/80 touch-none">◀</button>
+                        <span className="h-12 w-12 rounded-xl border border-white/10 bg-black/35" />
+                        <button {...holdControl('right', 1, 0)} aria-label="Move right" className="h-12 w-12 rounded-xl border border-white/25 bg-slate-950/75 text-xl font-black text-white shadow-lg active:bg-sky-500/80 touch-none">▶</button>
+                        <span />
+                        <button {...holdControl('backward', 1, 0)} aria-label="Move backward" className="h-12 w-12 rounded-xl border border-white/25 bg-slate-950/75 text-xl font-black text-white shadow-lg active:bg-sky-500/80 touch-none">▼</button>
+                        <span />
+                      </div>
+                      <button {...holdControl('sprint', true, false)} aria-label="Sprint" className="h-10 rounded-xl border border-amber-300/50 bg-amber-950/80 px-5 text-xs font-bold uppercase tracking-wider text-amber-100 shadow-lg active:bg-amber-500 active:text-slate-950 touch-none">Sprint</button>
+                    </div>
+
+                    <div className="pointer-events-auto grid w-[116px] grid-cols-2 gap-1.5">
+                      <button onClick={onContextAction} className="col-span-2 min-h-11 rounded-xl border border-cyan-300/50 bg-cyan-950/85 px-2 text-[10px] font-bold uppercase text-cyan-100 shadow-lg active:bg-cyan-500 active:text-slate-950">
+                        Interact
+                      </button>
+                      <button onClick={onToggleVehicle} className="col-span-2 min-h-11 rounded-xl border border-white/30 bg-slate-950/85 px-2 text-[10px] font-bold uppercase text-white shadow-lg active:bg-white active:text-slate-950">
+                        {isInVehicle || isInTrain || isInPlane || helicopterInFlight ? 'Exit / Board' : 'Enter / Board'}
+                      </button>
+                      <button {...holdControl('jump', true, false)} aria-label="Jump / take off" className="min-h-12 rounded-xl border border-sky-300/50 bg-sky-950/85 px-1 text-[10px] font-bold uppercase text-sky-100 shadow-lg active:bg-sky-500 active:text-slate-950 touch-none">Jump</button>
+                      <button {...holdControl('handbrake', true, false)} aria-label="Handbrake" className="min-h-12 rounded-xl border border-amber-300/50 bg-amber-950/85 px-1 text-[10px] font-bold uppercase text-amber-100 shadow-lg active:bg-amber-500 active:text-slate-950 touch-none">Brake</button>
+                      <button onClick={() => onAimToggle ? onAimToggle() : setAiming(!isAiming)} aria-label="Aim" className={`min-h-12 rounded-xl border px-1 text-[10px] font-bold uppercase shadow-lg active:scale-95 ${isAiming ? 'border-amber-300 bg-amber-400 text-slate-950' : 'border-white/25 bg-slate-950/85 text-white'}`}>Aim</button>
+                      <button onClick={onShoot} aria-label="Fire weapon" className="min-h-12 rounded-xl border border-rose-300/60 bg-rose-700/90 px-1 text-[10px] font-bold uppercase text-white shadow-lg active:bg-rose-400 active:text-slate-950">Fire</button>
+                      <button onClick={() => { if (onReload) onReload(); else useGameStore.getState().reloadWeapon(); audioManager.playGunReload(); }} aria-label="Reload weapon" className="col-span-2 min-h-10 rounded-xl border border-white/25 bg-slate-950/85 px-2 text-[10px] font-bold uppercase text-white shadow-lg active:bg-white active:text-slate-950">Reload</button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-1.5 w-28">

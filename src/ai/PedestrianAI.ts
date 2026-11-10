@@ -4,6 +4,7 @@ import { CollisionBox, getDistrictName } from '../world/CityGenerator';
 import { audioManager } from '../core/AudioManager';
 import { CITY_ROAD_COORDS } from '../world/CityGenerator';
 import { useGameStore } from '../core/gameState';
+import { CollisionGrid } from '../world/CollisionGrid';
 
 interface WalkNode {
   position: THREE.Vector3;
@@ -181,6 +182,8 @@ export class PedestrianAI {
   public isFleeing = false;
   public health = 50;
   public isDead = false;
+  public isInMetro = false;
+  public isBoardingMetro = false;
   public readonly profile: CitizenProfile;
   private walkSpeed: number;
   private fleeSpeed: number;
@@ -267,6 +270,32 @@ export class PedestrianAI {
     this.routePause = 0;
   }
 
+  public boardMetro(train: THREE.Group, seatPosition: THREE.Vector3): boolean {
+    if (this.isDead || this.isInMetro) return false;
+    this.isInMetro = true;
+    this.isBoardingMetro = false;
+    this.velocity.set(0, 0, 0);
+    this.group.removeFromParent();
+    train.add(this.group);
+    this.group.position.copy(seatPosition);
+    this.group.rotation.set(0, 0, 0);
+    this.rig.animate(0, false, true, 1 / 60);
+    return true;
+  }
+
+  public alightMetro(scene: THREE.Scene, position: THREE.Vector3, heading: number) {
+    if (!this.isInMetro && !this.isBoardingMetro) return;
+    this.group.removeFromParent();
+    scene.add(this.group);
+    this.position.copy(position);
+    this.position.y = 0;
+    this.heading = heading;
+    this.group.rotation.set(0, heading, 0);
+    this.isInMetro = false;
+    this.isBoardingMetro = false;
+    this.resetRoute();
+  }
+
   private addWalkingCane() {
     const cane = new THREE.Group();
     const material = new THREE.MeshStandardMaterial({ color: 0x3f3026, roughness: 0.6 });
@@ -309,8 +338,14 @@ export class PedestrianAI {
     this.heading = Math.atan2(away.x, away.z);
   }
 
-  public update(playerPos: THREE.Vector3, playerSpeed: number, colliders: CollisionBox[], dt: number) {
-    if (this.isDead) return;
+  public update(
+    playerPos: THREE.Vector3,
+    playerSpeed: number,
+    colliders: CollisionBox[],
+    dt: number,
+    nearbyPedestrians: PedestrianAI[] = []
+  ) {
+    if (this.isDead || this.isInMetro || this.isBoardingMetro) return;
 
     const distToPlayer = this.position.distanceTo(playerPos);
 
@@ -360,29 +395,90 @@ export class PedestrianAI {
     this.velocity.x = Math.sin(this.heading) * currentSpeed;
     this.velocity.z = Math.cos(this.heading) * currentSpeed;
 
-    const nextX = this.position.x + this.velocity.x * dt;
-    const nextZ = this.position.z + this.velocity.z * dt;
+    const intendedHeading = this.heading;
+    const nearbyActors = [
+      { position: playerPos, radius: 0.95 },
+      ...nearbyPedestrians
+        .filter((ped) => ped !== this && !ped.isDead)
+        .map((ped) => ({ position: ped.position, radius: 0.82 }))
+    ];
+    for (const actor of nearbyActors) {
+      const dx = this.position.x - actor.position.x;
+      const dz = this.position.z - actor.position.z;
+      const distance = Math.hypot(dx, dz);
+      if (distance >= actor.radius) continue;
 
-    let canMove = true;
-    for (const col of colliders) {
-      if (nextX > col.minX && nextX < col.maxX && nextZ > col.minZ && nextZ < col.maxZ) {
-        canMove = false;
-        this.heading += Math.PI * 0.75; // Turn around when hitting wall
-        this.route = [];
-        this.routePause = 0;
-        break;
+      const pushX = distance > 0.0001 ? dx / distance : Math.sin(intendedHeading);
+      const pushZ = distance > 0.0001 ? dz / distance : Math.cos(intendedHeading);
+      const correction = Math.min(actor.radius - distance + 0.02, 0.12);
+      const candidateX = this.position.x + pushX * correction;
+      const candidateZ = this.position.z + pushZ * correction;
+      const blockedByWorld = colliders.some((col) =>
+        candidateX > col.minX && candidateX < col.maxX && candidateZ > col.minZ && candidateZ < col.maxZ
+      );
+      const blockedByActor = nearbyActors.some((other) =>
+        other !== actor &&
+        Math.hypot(candidateX - other.position.x, candidateZ - other.position.z) < other.radius
+      );
+      if (!blockedByWorld && !blockedByActor) {
+        this.position.x = candidateX;
+        this.position.z = candidateZ;
+      }
+    }
+    let nearestActor: THREE.Vector3 | null = null;
+    let nearestActorDistance = Number.POSITIVE_INFINITY;
+    for (const actor of nearbyActors) {
+      const distance = this.position.distanceTo(actor.position);
+      if (distance < 2.2 && distance < nearestActorDistance) {
+        nearestActor = actor.position;
+        nearestActorDistance = distance;
       }
     }
 
-    if (canMove) {
+    let preferredSide = 1;
+    if (nearestActor) {
+      const dx = nearestActor.x - this.position.x;
+      const dz = nearestActor.z - this.position.z;
+      const rightX = Math.cos(intendedHeading);
+      const rightZ = -Math.sin(intendedHeading);
+      preferredSide = dx * rightX + dz * rightZ > 0 ? -1 : 1;
+    }
+
+    const candidateHeadings = nearestActor
+      ? [
+          intendedHeading + preferredSide * 0.9,
+          intendedHeading - preferredSide * 0.9,
+          intendedHeading + preferredSide * 1.45,
+          intendedHeading - preferredSide * 1.45,
+          intendedHeading + Math.PI
+        ]
+      : [intendedHeading];
+    let moved = false;
+
+    for (const candidateHeading of candidateHeadings) {
+      const nextX = this.position.x + Math.sin(candidateHeading) * currentSpeed * dt;
+      const nextZ = this.position.z + Math.cos(candidateHeading) * currentSpeed * dt;
+      const blockedByWorld = colliders.some((col) =>
+        nextX > col.minX && nextX < col.maxX && nextZ > col.minZ && nextZ < col.maxZ
+      );
+      if (blockedByWorld) continue;
+
+      const blockedByActor = nearbyActors.some((actor) =>
+        Math.hypot(nextX - actor.position.x, nextZ - actor.position.z) < actor.radius
+      );
+      if (blockedByActor) continue;
+
       this.position.x = nextX;
       this.position.z = nextZ;
+      this.heading = candidateHeading;
+      moved = true;
+      break;
     }
 
     this.position.y = 0;
 
     // Procedural animation
-    this.rig.animate(currentSpeed / 2.5, false, false, dt, {
+    this.rig.animate(moved ? currentSpeed / 2.5 : 0, false, false, dt, {
       running: this.isFleeing,
       fatigue: this.profile.personality === 'hurried' ? 0.25 : 0
     });
@@ -392,12 +488,12 @@ export class PedestrianAI {
 export class PedestrianManager {
   public pedestrians: PedestrianAI[] = [];
   private scene: THREE.Scene;
-  private colliders: CollisionBox[];
   private routeGraph: WalkNode[];
+  private collisionGrid: CollisionGrid;
 
-  constructor(scene: THREE.Scene, colliders: CollisionBox[]) {
+  constructor(scene: THREE.Scene, colliders: CollisionBox[], collisionGrid: CollisionGrid) {
     this.scene = scene;
-    this.colliders = colliders;
+    this.collisionGrid = collisionGrid;
     this.routeGraph = createSidewalkNetwork(colliders);
     this.spawnPedestrians(40);
   }
@@ -440,6 +536,7 @@ export class PedestrianManager {
 
   public update(playerPos: THREE.Vector3, playerSpeed: number, dt: number) {
     for (const ped of this.pedestrians) {
+      if (ped.isInMetro || ped.isBoardingMetro) continue;
       // Re-cluster pedestrians if too far
       if (ped.position.distanceTo(playerPos) > 160) {
         if (this.routeGraph.length > 0) {
@@ -455,7 +552,13 @@ export class PedestrianManager {
         ped.group.rotation.x = 0;
         ped.resetRoute();
       }
-      ped.update(playerPos, playerSpeed, this.colliders, dt);
+      ped.update(
+        playerPos,
+        playerSpeed,
+        this.collisionGrid.getNearby(ped.position.x, ped.position.z, 4),
+        dt,
+        this.pedestrians
+      );
     }
   }
 }

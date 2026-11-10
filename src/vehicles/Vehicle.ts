@@ -26,6 +26,7 @@ export class Vehicle {
   public isPlayerDriving = false;
   public isTraffic = false;
   public isDestroyed = false;
+  public isParked = false;
 
   // Animated Door Pivot Angles
   public leftDoorAngle = 0;
@@ -114,6 +115,10 @@ export class Vehicle {
     this.group.add(this.underglow);
   }
 
+  public get collisionRadius() {
+    return this.rules.collisionRadius;
+  }
+
   public update(
     input: { throttle: number; brake: number; steer: number; handbrake: boolean },
     colliders: CollisionBox[],
@@ -143,7 +148,7 @@ export class Vehicle {
     const massFactor = THREE.MathUtils.clamp(Math.sqrt(1600 / this.rules.massKg), 0.78, 1.28);
     const downforceGrip = 1 + speedRatio * 0.2;
 
-    if (this.isDestroyed) {
+    if (this.isParked || this.isDestroyed) {
       this.speed = 0;
     } else if (input.throttle > 0 && this.fuel > 0) {
       if (this.speed < -0.5) {
@@ -202,32 +207,60 @@ export class Vehicle {
       this.heading += (turnRate - espCorrection) * dt;
     }
 
+    if (this.isParked) {
+      this.speed = 0;
+      this.steerAngle = 0;
+    }
+
     this.group.rotation.y = this.heading;
 
     // 4. Update velocity and position
     const forwardVec = new THREE.Vector3(Math.sin(this.heading), 0, Math.cos(this.heading));
     this.velocity.copy(forwardVec).multiplyScalar(this.speed);
-    const nextX = THREE.MathUtils.clamp(this.position.x + this.velocity.x * dt, -WORLD_RADIUS + 8, WORLD_RADIUS - 8);
-    const nextZ = THREE.MathUtils.clamp(this.position.z + this.velocity.z * dt, -WORLD_RADIUS + 8, WORLD_RADIUS - 8);
+    const nextX = this.isParked
+      ? this.position.x
+      : THREE.MathUtils.clamp(this.position.x + this.velocity.x * dt, -WORLD_RADIUS + 8, WORLD_RADIUS - 8);
+    const nextZ = this.isParked
+      ? this.position.z
+      : THREE.MathUtils.clamp(this.position.z + this.velocity.z * dt, -WORLD_RADIUS + 8, WORLD_RADIUS - 8);
 
     // Collision check against city buildings & obstacles
     const carRadius = this.rules.collisionRadius;
     let collided = false;
 
     for (const other of otherVehicles) {
+      if (this.isParked) break;
       if (other === this || other.isDestroyed) continue;
-      const minDistance = (carRadius + other.rules.collisionRadius) * 0.72;
+      const minDistance = (carRadius + other.rules.collisionRadius) * 0.98;
       const dx = nextX - other.position.x;
       const dz = nextZ - other.position.z;
       const distance = Math.hypot(dx, dz);
       if (distance >= minDistance) continue;
 
       collided = true;
-      const normalX = distance > 0.001 ? dx / distance : 1;
-      const normalZ = distance > 0.001 ? dz / distance : 0;
-      const overlap = minDistance - distance;
-      this.position.x += normalX * overlap * 0.5;
-      this.position.z += normalZ * overlap * 0.5;
+      if (this.isTraffic && other.isTraffic) {
+        let normalX = distance > 0.001 ? dx / distance : Math.cos(this.heading);
+        let normalZ = distance > 0.001 ? dz / distance : -Math.sin(this.heading);
+        const normalLength = Math.hypot(normalX, normalZ) || 1;
+        normalX /= normalLength;
+        normalZ /= normalLength;
+        this.position.x = other.position.x + normalX * minDistance;
+        this.position.z = other.position.z + normalZ * minDistance;
+        this.speed = 0;
+        break;
+      }
+      let fallbackX = Math.sin(this.heading) - Math.sin(other.heading);
+      let fallbackZ = Math.cos(this.heading) - Math.cos(other.heading);
+      let fallbackLength = Math.hypot(fallbackX, fallbackZ);
+      if (fallbackLength < 0.001) {
+        fallbackX = Math.cos(this.heading);
+        fallbackZ = -Math.sin(this.heading);
+        fallbackLength = 1;
+      }
+      const normalX = distance > 0.001 ? dx / distance : fallbackX / fallbackLength;
+      const normalZ = distance > 0.001 ? dz / distance : fallbackZ / fallbackLength;
+      this.position.x = other.position.x + normalX * minDistance;
+      this.position.z = other.position.z + normalZ * minDistance;
 
       if (this.collisionCooldown === 0 && other.collisionCooldown === 0) {
         const impactSpeed = Math.abs(this.speed - other.speed);
@@ -244,6 +277,7 @@ export class Vehicle {
     }
 
     for (const col of colliders) {
+      if (this.isParked) break;
       if (collided) break;
       if (
         nextX + carRadius > col.minX &&
@@ -339,6 +373,9 @@ export class Vehicle {
     this.rig.body.rotation.z = this.bodyRoll;
     this.rig.body.rotation.x = this.bodyPitch;
     this.rig.animate?.(dt, this.speed, input);
+    if (this.rig.steeringWheel) {
+      this.rig.steeringWheel.rotation.z = -this.steerAngle * 2.2;
+    }
 
     // 7. Brake Lights & Taillights
     const isBraking = (input.brake > 0 && this.speed > 0.5) || input.handbrake;
