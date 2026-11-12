@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { VehicleAnimationInput, VehicleMeshRig, VehicleType } from '../types';
 
 export interface VehicleDimensions {
@@ -15,6 +16,11 @@ export interface VehicleBuildContext {
   root: THREE.Group;
   body: THREE.Group;
   bodyMaterial: THREE.MeshStandardMaterial;
+  interiorCameraPosition: THREE.Vector3;
+  damageParts: {
+    mirrors: THREE.Object3D[];
+    windows: THREE.Mesh[];
+  };
   glassMaterial: THREE.MeshPhysicalMaterial;
   trimMaterial: THREE.MeshStandardMaterial;
   chromeMaterial: THREE.MeshStandardMaterial;
@@ -27,7 +33,34 @@ export interface VehicleBuildContext {
   leftDoorPivot?: THREE.Group;
   rightDoorPivot?: THREE.Group;
   steeringWheel?: THREE.Group;
+  speedNeedle?: THREE.Mesh;
+  rpmNeedle?: THREE.Mesh;
 }
+
+const interiorAccentColors: Record<VehicleType, number> = {
+  sports: 0xef5b43,
+  sedan: 0x55b9d1,
+  taxi: 0xd4a741,
+  police: 0x4b9ee8,
+  suv: 0xc3a77c,
+  ambulance: 0xb9cbd0,
+  truck: 0x8db3aa,
+  motorcycle: 0xe7a83e
+};
+const interiorAccentMaterials = Object.fromEntries(
+  Object.entries(interiorAccentColors).map(([type, color]) => [
+    type,
+    new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.25 })
+  ])
+) as Record<VehicleType, THREE.MeshStandardMaterial>;
+const displayMaterial = new THREE.MeshStandardMaterial({
+  color: 0x071827,
+  emissive: 0x07384e,
+  emissiveIntensity: 0.9,
+  roughness: 0.24,
+  metalness: 0.08
+});
+const interiorDetailGeometry = new THREE.BoxGeometry(1, 1, 1);
 
 const defaultDimensions: VehicleDimensions = {
   width: 2,
@@ -83,7 +116,9 @@ export function createVehicleBuildContext(type: VehicleType, colorHex: number, o
 
   return {
     type, root, body, bodyMaterial, glassMaterial, trimMaterial, chromeMaterial,
-    interiorMaterial, tireMaterial, dimensions, headlights: [], taillights: [], wheels: []
+    interiorMaterial, tireMaterial, dimensions, headlights: [], taillights: [], wheels: [],
+    interiorCameraPosition: new THREE.Vector3(0, 1.1, 0),
+    damageParts: { mirrors: [], windows: [] }
   };
 }
 
@@ -170,6 +205,8 @@ export function addVehicleBody(
   geometry.rotateY(-Math.PI / 2);
   geometry.translate((width - 0.08) / 2, 0, z);
   const shell = new THREE.Mesh(geometry, options.material ?? ctx.bodyMaterial);
+  shell.userData.vehicleType = ctx.type;
+  shell.userData.paintable = true;
   shell.castShadow = true;
   shell.receiveShadow = true;
   ctx.body.add(shell);
@@ -186,6 +223,55 @@ export function addVehicleBody(
     ctx.trimMaterial
   );
   grille.castShadow = false;
+  const grilleSlats = new THREE.InstancedMesh(
+    new THREE.BoxGeometry(width * 0.28, 0.012, 0.012),
+    ctx.chromeMaterial,
+    4
+  );
+  const slatTransform = new THREE.Object3D();
+  for (let index = 0; index < 4; index++) {
+    slatTransform.position.set(
+      0,
+      bumperY + bodyHeight * 0.2 - 0.04 + index * 0.027,
+      z + length * 0.505
+    );
+    slatTransform.updateMatrix();
+    grilleSlats.setMatrixAt(index, slatTransform.matrix);
+  }
+  grilleSlats.castShadow = false;
+  ctx.body.add(grilleSlats);
+
+  addBox(
+    ctx,
+    ctx.body,
+    [width * 0.9, 0.075, 0.12],
+    [0, bottomY + bodyHeight * 0.1, z],
+    ctx.trimMaterial
+  );
+  addBox(
+    ctx,
+    ctx.body,
+    [width * 0.3, 0.12, 0.025],
+    [0, bumperY + bodyHeight * 0.22, z - length * 0.48],
+    ctx.trimMaterial
+  );
+  const doorSeams = new THREE.InstancedMesh(
+    interiorDetailGeometry,
+    ctx.trimMaterial,
+    4
+  );
+  const seamTransform = new THREE.Object3D();
+  let seamIndex = 0;
+  for (const side of [-1, 1]) {
+    for (const seamZ of [z + length * 0.08, z - length * 0.16]) {
+      seamTransform.position.set(side * (width * 0.5 + 0.004), bottomY + bodyHeight * 0.55, seamZ);
+      seamTransform.scale.set(0.012, bodyHeight * 0.54, 0.012);
+      seamTransform.updateMatrix();
+      doorSeams.setMatrixAt(seamIndex++, seamTransform.matrix);
+    }
+  }
+  doorSeams.castShadow = false;
+  ctx.body.add(doorSeams);
 
   for (const side of [-1, 1]) {
     const handle = addBox(
@@ -196,6 +282,16 @@ export function addVehicleBody(
       ctx.chromeMaterial
     );
     handle.castShadow = false;
+    const mirror = addBox(
+      ctx,
+      ctx.body,
+      [0.16, 0.09, 0.19],
+      [side * (width * 0.51), topY - bodyHeight * 0.08, z + length * 0.2],
+      ctx.trimMaterial
+    );
+    mirror.name = 'vehicle-mirror';
+    ctx.damageParts.mirrors.push(mirror);
+    mirror.castShadow = false;
   }
 }
 
@@ -208,7 +304,8 @@ export function addCabin(
   const roofY = y + height * 0.48;
   const glassMaterial = ctx.glassMaterial.clone();
   glassMaterial.side = THREE.DoubleSide;
-  glassMaterial.opacity = ctx.type === 'police' ? 0.88 : 0.4;
+  glassMaterial.opacity = ctx.type === 'police' ? 0.3 : 0.16;
+  glassMaterial.depthWrite = false;
 
   const roofMaterial = options.roofColor === undefined
     ? ctx.bodyMaterial
@@ -221,9 +318,11 @@ export function addCabin(
     geometry.setIndex([0, 1, 2, 0, 2, 3]);
     geometry.computeVertexNormals();
     const pane = new THREE.Mesh(geometry, glassMaterial);
+    pane.name = 'vehicle-window';
     pane.castShadow = false;
     pane.receiveShadow = true;
     ctx.body.add(pane);
+    ctx.damageParts.windows.push(pane);
   };
 
   const bottomHalfWidth = width * 0.48;
@@ -264,6 +363,11 @@ export function addCabin(
     addBeam(ctx, side, bottomY, z + length * 0.04, roofY - 0.02, z + length * 0.04, width * 0.028);
   }
 
+  ctx.interiorCameraPosition.set(
+    -width * 0.24,
+    y + 0.12,
+    z - length * 0.12 + 0.08
+  );
   addInterior(ctx, width, length, y, z);
   addDoors(ctx, length, bottomY);
 }
@@ -293,26 +397,179 @@ function addBeam(
 function addInterior(ctx: VehicleBuildContext, width: number, length: number, cabinY: number, cabinZ: number) {
   const seatMaterial = ctx.interiorMaterial;
   const seatZ = cabinZ - length * 0.12;
+  const seatWidthScale: Record<VehicleType, number> = {
+    sports: 0.82,
+    sedan: 1,
+    taxi: 1,
+    police: 0.95,
+    suv: 1.12,
+    ambulance: 1.04,
+    truck: 1.14,
+    motorcycle: 0.8
+  };
   for (const x of [-width * 0.24, width * 0.24]) {
     const cushion = new THREE.Mesh(new THREE.CapsuleGeometry(0.15, 0.2, 4, 8), seatMaterial);
-    cushion.scale.set(1.35, 0.65, 1.05);
+    cushion.scale.set(1.35 * seatWidthScale[ctx.type], 0.65, 1.05);
     cushion.position.set(x, cabinY - 0.29, seatZ);
     ctx.body.add(cushion);
 
     const backrest = new THREE.Mesh(new THREE.CapsuleGeometry(0.14, 0.3, 4, 8), seatMaterial);
-    backrest.scale.set(1.3, 0.82, 0.48);
+    backrest.scale.set(1.3 * seatWidthScale[ctx.type], ctx.type === 'sports' ? 0.95 : 0.82, 0.48);
     backrest.position.set(x, cabinY - 0.04, seatZ - 0.12);
     backrest.rotation.x = -0.08;
     ctx.body.add(backrest);
 
-    const headrest = new THREE.Mesh(new THREE.SphereGeometry(0.075, 12, 10), seatMaterial);
-    headrest.scale.set(1.25, 1.05, 0.65);
+    const headrest = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.1, 3, 8), seatMaterial);
+    headrest.scale.set(1.05, 0.75, 0.7);
     headrest.position.set(x, cabinY + 0.15, seatZ - 0.15);
     ctx.body.add(headrest);
   }
 
-  addBox(ctx, ctx.body, [width * 0.82, 0.12, 0.16], [0, cabinY - 0.12, cabinZ + length * 0.34], ctx.trimMaterial);
-  addBox(ctx, ctx.body, [0.18, 0.15, length * 0.32], [0, cabinY - 0.18, cabinZ - length * 0.02], ctx.interiorMaterial);
+  const accent = interiorAccentMaterials[ctx.type];
+  const dashZ = cabinZ + length * 0.37;
+  addBox(ctx, ctx.body, [width * 0.9, 0.2, 0.24], [0, cabinY - 0.13, dashZ], ctx.trimMaterial);
+  addBox(ctx, ctx.body, [width * 0.82, 0.055, 0.19], [0, cabinY - 0.27, dashZ - 0.025], ctx.interiorMaterial);
+
+  const screenSize = ctx.type === 'truck' || ctx.type === 'police'
+    ? [0.42, 0.2] as const
+    : ctx.type === 'sports'
+      ? [0.3, 0.16] as const
+      : [0.36, 0.18] as const;
+  const screenX = ctx.type === 'police' ? width * 0.14 : width * 0.12;
+  const screen = addBox(
+    ctx,
+    ctx.body,
+    [screenSize[0], screenSize[1], 0.018],
+    [screenX, cabinY - 0.02, dashZ + 0.12],
+    displayMaterial
+  );
+  screen.castShadow = false;
+  const screenLines = new THREE.InstancedMesh(interiorDetailGeometry, accent, 3);
+  const screenLineTransform = new THREE.Object3D();
+  for (let index = 0; index < 3; index++) {
+    screenLineTransform.position.set(
+      screenX - screenSize[0] * 0.25,
+      cabinY - 0.02 + screenSize[1] * (0.25 - index * 0.23),
+      dashZ + 0.132
+    );
+    screenLineTransform.scale.set(screenSize[0] * (index === 0 ? 0.42 : 0.3), 0.008, 0.004);
+    screenLineTransform.updateMatrix();
+    screenLines.setMatrixAt(index, screenLineTransform.matrix);
+  }
+  screenLines.castShadow = false;
+  ctx.body.add(screenLines);
+  addBox(
+    ctx,
+    ctx.body,
+    [0.3, 0.14, 0.018],
+    [-width * 0.22, cabinY - 0.025, dashZ + 0.12],
+    displayMaterial
+  ).castShadow = false;
+  const dialGeometry = new THREE.TorusGeometry(0.043, 0.004, 6, 16);
+  const dialCenters = [-width * 0.28, -width * 0.16];
+  const needles: THREE.Mesh[] = [];
+  for (const dialX of dialCenters) {
+    const dial = new THREE.Mesh(dialGeometry, accent);
+    dial.position.set(dialX, cabinY - 0.025, dashZ + 0.132);
+    dial.castShadow = false;
+    ctx.body.add(dial);
+    const needle = new THREE.Mesh(
+      new THREE.BoxGeometry(0.008, 0.045, 0.006),
+      accent
+    );
+    needle.position.set(dialX, cabinY - 0.025, dashZ + 0.14);
+    needle.castShadow = false;
+    ctx.body.add(needle);
+    needles.push(needle);
+  }
+  ctx.speedNeedle = needles[0];
+  ctx.rpmNeedle = needles[1];
+  const dialTicks = new THREE.InstancedMesh(interiorDetailGeometry, accent, 12);
+  const tickTransform = new THREE.Object3D();
+  let tickIndex = 0;
+  for (const dialX of dialCenters) {
+    for (let index = 0; index < 6; index++) {
+      const angle = THREE.MathUtils.lerp(-2.2, 2.2, index / 5);
+      tickTransform.position.set(
+        dialX + Math.sin(angle) * 0.035,
+        cabinY - 0.025 + Math.cos(angle) * 0.035,
+        dashZ + 0.14
+      );
+      tickTransform.rotation.z = -angle;
+      tickTransform.scale.set(0.004, 0.012, 0.004);
+      tickTransform.updateMatrix();
+      dialTicks.setMatrixAt(tickIndex++, tickTransform.matrix);
+    }
+  }
+  dialTicks.castShadow = false;
+  ctx.body.add(dialTicks);
+  for (const ventX of [-width * 0.36, width * 0.36]) {
+    addBox(
+      ctx,
+      ctx.body,
+      [0.16, 0.035, 0.02],
+      [ventX, cabinY - 0.1, dashZ + 0.12],
+      ctx.chromeMaterial
+    ).castShadow = false;
+  }
+  const climateButtons = new THREE.InstancedMesh(interiorDetailGeometry, accent, 5);
+  const buttonTransform = new THREE.Object3D();
+  for (let index = 0; index < 5; index++) {
+    buttonTransform.position.set(
+      (index - 2) * 0.045,
+      cabinY - 0.22,
+      dashZ + 0.105
+    );
+    buttonTransform.scale.set(0.025, 0.018, 0.012);
+    buttonTransform.updateMatrix();
+    climateButtons.setMatrixAt(index, buttonTransform.matrix);
+  }
+  climateButtons.castShadow = false;
+  ctx.body.add(climateButtons);
+
+  addBox(
+    ctx,
+    ctx.body,
+    [width * 0.22, 0.07, length * 0.26],
+    [0, cabinY - 0.25, cabinZ + length * 0.08],
+    ctx.interiorMaterial
+  );
+  addBox(
+    ctx,
+    ctx.body,
+    [width * 0.26, 0.07, length * 0.1],
+    [0, cabinY - 0.15, cabinZ - length * 0.04],
+    seatMaterial
+  );
+  const cupHolders = new THREE.InstancedMesh(
+    new THREE.CylinderGeometry(0.04, 0.04, 0.012, 12),
+    ctx.trimMaterial,
+    2
+  );
+  const cupHolderTransform = new THREE.Object3D();
+  for (let index = 0; index < 2; index++) {
+    cupHolderTransform.position.set(
+      index === 0 ? -0.06 : 0.06,
+      cabinY - 0.205,
+      cabinZ + length * 0.12
+    );
+    cupHolderTransform.updateMatrix();
+    cupHolders.setMatrixAt(index, cupHolderTransform.matrix);
+  }
+  cupHolders.castShadow = false;
+  ctx.body.add(cupHolders);
+  const selector = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.035, 0.15, 8), ctx.chromeMaterial);
+  selector.position.set(ctx.type === 'sports' ? 0.06 : 0.08, cabinY - 0.15, cabinZ + length * 0.16);
+  selector.rotation.x = -0.2;
+  ctx.body.add(selector);
+  addBox(
+    ctx,
+    ctx.body,
+    [0.16, 0.025, 0.035],
+    [0, cabinY - 0.12, cabinZ + length * 0.07],
+    accent
+  );
+
   const rearCushion = new THREE.Mesh(new THREE.CapsuleGeometry(0.15, 0.34, 4, 10), seatMaterial);
   rearCushion.rotation.z = Math.PI / 2;
   rearCushion.scale.set(1.2, 0.75, 1);
@@ -364,6 +621,15 @@ function addInterior(ctx: VehicleBuildContext, width: number, length: number, ca
   ctx.body.add(steering);
   ctx.steeringWheel = steering;
   addBox(ctx, ctx.body, [width * 0.74, 0.16, 0.16], [0, cabinY - 0.32, cabinZ + length * 0.36], ctx.trimMaterial);
+  for (const buttonX of [-1, 1]) {
+    addBox(
+      ctx,
+      steering,
+      [0.035, 0.026, 0.014],
+      [buttonX * radius * 0.55, -radius * 0.08, tube * 0.45],
+      accent
+    );
+  }
 }
 
 function addDoors(ctx: VehicleBuildContext, length: number, bottomY: number) {
@@ -373,7 +639,10 @@ function addDoors(ctx: VehicleBuildContext, length: number, bottomY: number) {
     const pivot = new THREE.Group();
     pivot.position.set(side * ctx.dimensions.width * 0.5, bottomY + doorHeight * 0.52, 0.4);
     addBox(ctx, pivot, [0.065, doorHeight, doorLength], [side * 0.025, -0.12, -doorLength * 0.5], ctx.bodyMaterial);
-    addBox(ctx, pivot, [0.035, 0.035, 0.16], [side * 0.045, -0.02, -doorLength * 0.32], ctx.chromeMaterial);
+    addBox(ctx, pivot, [0.025, doorHeight * 0.78, doorLength * 0.84], [-side * 0.018, -0.12, -doorLength * 0.5], ctx.interiorMaterial);
+    addBox(ctx, pivot, [0.07, 0.045, doorLength * 0.4], [-side * 0.045, -0.17, -doorLength * 0.52], ctx.trimMaterial);
+    addBox(ctx, pivot, [0.035, 0.035, 0.16], [-side * 0.045, -0.02, -doorLength * 0.32], ctx.chromeMaterial);
+    addBox(ctx, pivot, [0.028, 0.014, 0.09], [-side * 0.045, -0.08, -doorLength * 0.68], ctx.chromeMaterial);
     ctx.body.add(pivot);
     if (side < 0) ctx.leftDoorPivot = pivot;
     else ctx.rightDoorPivot = pivot;
@@ -381,7 +650,7 @@ function addDoors(ctx: VehicleBuildContext, length: number, bottomY: number) {
 }
 
 export function addWheels(ctx: VehicleBuildContext, positions?: Array<[number, number]>) {
-  const { width, wheelBase, wheelRadius, trackWidth } = ctx.dimensions;
+  const { wheelBase, wheelRadius, trackWidth } = ctx.dimensions;
   const wheelPositions = positions ?? [
     [-trackWidth / 2, wheelBase / 2],
     [trackWidth / 2, wheelBase / 2],
@@ -389,21 +658,57 @@ export function addWheels(ctx: VehicleBuildContext, positions?: Array<[number, n
     [trackWidth / 2, -wheelBase / 2]
   ];
 
+  const tireGeo = new THREE.CylinderGeometry(wheelRadius, wheelRadius, 0.3, 24);
+  tireGeo.rotateZ(Math.PI / 2);
+  const rimGeo = new THREE.CylinderGeometry(wheelRadius * 0.66, wheelRadius * 0.66, 0.32, 20);
+  rimGeo.rotateZ(Math.PI / 2);
+  const hubGeo = new THREE.CylinderGeometry(wheelRadius * 0.19, wheelRadius * 0.19, 0.34, 12);
+  hubGeo.rotateZ(Math.PI / 2);
+  const spokeCountByType: Record<VehicleType, number> = {
+    sports: 5,
+    sedan: 8,
+    taxi: 6,
+    police: 6,
+    suv: 6,
+    ambulance: 6,
+    truck: 8,
+    motorcycle: 5
+  };
+  const spokeCount = spokeCountByType[ctx.type];
+  const rimParts: THREE.BufferGeometry[] = [rimGeo];
+  const spokeTransform = new THREE.Object3D();
+  for (const side of [-1, 1]) {
+    for (let index = 0; index < spokeCount; index++) {
+      const angle = (index / spokeCount) * Math.PI * 2;
+      const spokeGeo = new THREE.BoxGeometry(0.045, wheelRadius * 0.48, 0.035);
+      spokeTransform.position.set(
+        side * 0.16,
+        Math.sin(angle) * wheelRadius * 0.38,
+        Math.cos(angle) * wheelRadius * 0.38
+      );
+      spokeTransform.rotation.set(angle, 0, 0);
+      spokeTransform.updateMatrix();
+      spokeGeo.applyMatrix4(spokeTransform.matrix);
+      rimParts.push(spokeGeo);
+    }
+  }
+  const detailedRimGeo = mergeGeometries(rimParts, false);
+  if (!detailedRimGeo) {
+    throw new Error(`Could not build wheel geometry for "${ctx.type}"`);
+  }
+  for (const geometry of rimParts) {
+    if (geometry !== detailedRimGeo) geometry.dispose();
+  }
+
   for (const [x, z] of wheelPositions) {
     const wheel = new THREE.Group();
     const axle = new THREE.Group();
     const radius = wheelRadius;
-    const tireGeo = new THREE.CylinderGeometry(radius, radius, 0.3, 20);
-    tireGeo.rotateZ(Math.PI / 2);
     const tire = new THREE.Mesh(tireGeo, ctx.tireMaterial);
     tire.castShadow = true;
     axle.add(tire);
 
-    const rimGeo = new THREE.CylinderGeometry(radius * 0.66, radius * 0.66, 0.32, 16);
-    rimGeo.rotateZ(Math.PI / 2);
-    axle.add(new THREE.Mesh(rimGeo, ctx.chromeMaterial));
-    const hubGeo = new THREE.CylinderGeometry(radius * 0.19, radius * 0.19, 0.34, 12);
-    hubGeo.rotateZ(Math.PI / 2);
+    axle.add(new THREE.Mesh(detailedRimGeo, ctx.chromeMaterial));
     axle.add(new THREE.Mesh(hubGeo, ctx.trimMaterial));
     wheel.add(axle);
     wheel.position.set(x, radius, z);
@@ -420,21 +725,59 @@ export function addRoadLights(ctx: VehicleBuildContext) {
   const headlightMat = new THREE.MeshStandardMaterial({
     color: 0xfff8d9,
     emissive: 0xffedb5,
-    emissiveIntensity: 1.2,
+    emissiveIntensity: 0.9,
     roughness: 0.2
   });
   const taillightMat = new THREE.MeshStandardMaterial({
     color: 0x8c1720,
     emissive: 0xe5232d,
-    emissiveIntensity: 0.65,
+    emissiveIntensity: 0.55,
     roughness: 0.25
   });
+  const reverseLightMat = new THREE.MeshStandardMaterial({
+    color: 0xdde8e9,
+    emissive: 0xb9d7de,
+    emissiveIntensity: 0.2,
+    roughness: 0.28
+  });
+  const housingBoxes: Array<{ size: [number, number, number]; position: [number, number, number] }> = [];
+  const headlightBoxes: Array<{ size: [number, number, number]; position: [number, number, number] }> = [];
+  const taillightBoxes: Array<{ size: [number, number, number]; position: [number, number, number] }> = [];
+  const reverseLightBoxes: Array<{ size: [number, number, number]; position: [number, number, number] }> = [];
   for (const x of [-width * 0.38, width * 0.38]) {
-    const headlight = addBox(ctx, ctx.body, [0.3, 0.16, 0.08], [x, 0.48, length * 0.505], headlightMat);
-    ctx.headlights.push(headlight);
-    const taillight = addBox(ctx, ctx.body, [0.3, 0.16, 0.08], [x, 0.52, -length * 0.505], taillightMat);
-    ctx.taillights.push(taillight);
+    housingBoxes.push(
+      { size: [0.36, 0.2, 0.06], position: [x, 0.5, length * 0.49] },
+      { size: [0.36, 0.2, 0.06], position: [x, 0.53, -length * 0.49] }
+    );
+    headlightBoxes.push(
+      { size: [0.3, 0.1, 0.035], position: [x, 0.51, length * 0.525] },
+      { size: [0.26, 0.025, 0.02], position: [x, 0.43, length * 0.53] }
+    );
+    taillightBoxes.push({ size: [0.3, 0.12, 0.035], position: [x, 0.53, -length * 0.525] });
+    reverseLightBoxes.push({ size: [0.12, 0.035, 0.02], position: [x, 0.51, -length * 0.53] });
   }
+
+  const addLightInstances = (
+    boxes: Array<{ size: [number, number, number]; position: [number, number, number] }>,
+    material: THREE.Material
+  ) => {
+    const instances = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), material, boxes.length);
+    const transform = new THREE.Object3D();
+    boxes.forEach(({ size, position }, index) => {
+      transform.position.set(...position);
+      transform.scale.set(...size);
+      transform.updateMatrix();
+      instances.setMatrixAt(index, transform.matrix);
+    });
+    instances.castShadow = false;
+    instances.receiveShadow = false;
+    ctx.body.add(instances);
+    return instances;
+  };
+  addLightInstances(housingBoxes, ctx.trimMaterial);
+  ctx.headlights.push(addLightInstances(headlightBoxes, headlightMat));
+  ctx.taillights.push(addLightInstances(taillightBoxes, taillightMat));
+  addLightInstances(reverseLightBoxes, reverseLightMat);
 }
 
 export function finishVehicleModel(
@@ -452,6 +795,9 @@ export function finishVehicleModel(
   return {
     group: ctx.root,
     body: ctx.body,
+    bodyMaterial: ctx.bodyMaterial,
+    interiorCameraPosition: ctx.interiorCameraPosition,
+    damageParts: ctx.damageParts,
     wheels: ctx.wheels,
     frontLeftWheel,
     frontRightWheel,
@@ -461,6 +807,8 @@ export function finishVehicleModel(
     rightDoorPivot: ctx.rightDoorPivot,
     sirenMeshes,
     steeringWheel: ctx.steeringWheel,
+    speedNeedle: ctx.speedNeedle,
+    rpmNeedle: ctx.rpmNeedle,
     features,
     animate
   };

@@ -153,6 +153,12 @@ export const HUD: React.FC<HUDProps> = ({
   };
 
   const activeWep = weapons[currentWeapon];
+  const isSniperScoped = currentWeapon === 'sniper' &&
+    isAiming &&
+    !isInVehicle &&
+    !isInPlane &&
+    !isInTrain &&
+    !isWasted;
   const holdControl = (key: string, activeValue: number | boolean, inactiveValue: number | boolean) => ({
     onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => {
       event.preventDefault();
@@ -206,7 +212,7 @@ export const HUD: React.FC<HUDProps> = ({
       )}
 
       {/* 2. CENTERED TARGETING CROSSHAIR */}
-      {!isInVehicle && !isInPlane && !isInTrain && !isWasted && (
+      {!isSniperScoped && !isInVehicle && !isInPlane && !isInTrain && !isWasted && (
         <div className="fixed inset-0 pointer-events-none flex items-center justify-center z-20">
           <div
             className={`relative flex items-center justify-center transition-transform duration-75 ${
@@ -220,6 +226,15 @@ export const HUD: React.FC<HUDProps> = ({
             <div className="absolute -bottom-3 w-0.5 h-2 bg-white/80 shadow-[0_0_3px_black]" />
             <div className="absolute -left-3 h-0.5 w-2 bg-white/80 shadow-[0_0_3px_black]" />
             <div className="absolute -right-3 h-0.5 w-2 bg-white/80 shadow-[0_0_3px_black]" />
+          </div>
+        </div>
+      )}
+      {isSniperScoped && (
+        <div className="fixed inset-0 pointer-events-none flex items-center justify-center z-20">
+          <div className="relative h-[min(90vw,90vh)] w-[min(90vw,90vh)] overflow-hidden rounded-full border border-emerald-100/75 shadow-[0_0_0_9999px_rgba(0,0,0,0.82)]">
+            <div className="absolute left-1/2 top-0 h-full w-px bg-emerald-100/65" />
+            <div className="absolute left-0 top-1/2 h-px w-full bg-emerald-100/65" />
+            <div className="absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-emerald-100/80" />
           </div>
         </div>
       )}
@@ -654,8 +669,8 @@ export const HUD: React.FC<HUDProps> = ({
               </div>
             </div>
             {/* Weapon Selector Icons */}
-            <div className="grid grid-cols-5 gap-1">
-              {(['fists', 'knife', 'pistol', 'smg', 'rifle'] as WeaponType[]).map((w, idx) => (
+            <div className="grid grid-cols-6 gap-1">
+              {(['fists', 'knife', 'pistol', 'smg', 'rifle', 'sniper'] as WeaponType[]).map((w, idx) => (
                 <button
                   key={w}
                   onClick={() => selectWeapon(w)}
@@ -668,7 +683,7 @@ export const HUD: React.FC<HUDProps> = ({
                   aria-label={`Select ${weapons[w].name}`}
                   aria-pressed={currentWeapon === w}
                 >
-                  {w === 'fists' ? 'Fist' : w}
+                  {w === 'fists' ? 'Fist' : w === 'sniper' ? 'Scope' : w}
                 </button>
               ))}
             </div>

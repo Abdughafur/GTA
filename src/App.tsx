@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Game } from './core/Game';
+import { CanvasWorld } from './core/Game';
 import { useGameStore } from './core/gameState';
 import { HUD } from './ui/HUD';
 import { Smartphone } from './ui/Smartphone';
@@ -10,7 +10,7 @@ import * as THREE from 'three';
 
 export default function App() {
   const canvasMountRef = useRef<HTMLDivElement>(null);
-  const gameRef = useRef<Game | null>(null);
+  const worldRef = useRef<CanvasWorld | null>(null);
   const activeTouchControlsRef = useRef(new Set<string>());
 
   const screen = useGameStore((s) => s.screen);
@@ -23,9 +23,9 @@ export default function App() {
   useEffect(() => {
     if (!canvasMountRef.current) return;
 
-    const game = new Game(canvasMountRef.current);
-    gameRef.current = game;
-    game.start();
+    const world = new CanvasWorld(canvasMountRef.current);
+    worldRef.current = world;
+    world.start();
 
     // After loading completes, switch screen to title
     setScreen('title');
@@ -45,46 +45,46 @@ export default function App() {
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
-      game.destroy();
-      gameRef.current = null;
+      world.destroy();
+      worldRef.current = null;
     };
   }, [setScreen]);
 
   // Handle vehicle toggle from UI button
   const handleToggleVehicle = () => {
-    if (gameRef.current) {
-      gameRef.current.toggleVehicle();
+    if (worldRef.current) {
+      worldRef.current.toggleVehicle();
     }
   };
 
   // Handle touch inputs for mobile
   const handleTouchInput = (key: string, value: number | boolean) => {
-    if (!gameRef.current) return;
+    if (!worldRef.current) return;
     const active = value === true || value === 1;
     if (key === 'forward' || key === 'backward' || key === 'left' || key === 'right') {
       if (active) activeTouchControlsRef.current.add(key);
       else activeTouchControlsRef.current.delete(key);
-      gameRef.current.touchInput.forward =
+      worldRef.current.touchInput.forward =
         Number(activeTouchControlsRef.current.has('forward')) -
         Number(activeTouchControlsRef.current.has('backward'));
-      gameRef.current.touchInput.strafe =
+      worldRef.current.touchInput.strafe =
         Number(activeTouchControlsRef.current.has('right')) -
         Number(activeTouchControlsRef.current.has('left'));
       return;
     }
-    if (key === 'sprint') gameRef.current.touchInput.sprint = active;
-    if (key === 'jump') gameRef.current.touchInput.jump = active;
-    if (key === 'handbrake') gameRef.current.touchInput.handbrake = active;
+    if (key === 'sprint') worldRef.current.touchInput.sprint = active;
+    if (key === 'jump') worldRef.current.touchInput.jump = active;
+    if (key === 'handbrake') worldRef.current.touchInput.handbrake = active;
   };
 
   const clearTouchInputs = () => {
     activeTouchControlsRef.current.clear();
-    if (!gameRef.current) return;
-    gameRef.current.touchInput.forward = 0;
-    gameRef.current.touchInput.strafe = 0;
-    gameRef.current.touchInput.sprint = false;
-    gameRef.current.touchInput.jump = false;
-    gameRef.current.touchInput.handbrake = false;
+    if (!worldRef.current) return;
+    worldRef.current.touchInput.forward = 0;
+    worldRef.current.touchInput.strafe = 0;
+    worldRef.current.touchInput.sprint = false;
+    worldRef.current.touchInput.jump = false;
+    worldRef.current.touchInput.handbrake = false;
   };
 
   useEffect(() => {
@@ -99,24 +99,24 @@ export default function App() {
 
   // Accept mission from Smartphone SMS
   const handleAcceptMission = (missionId: string) => {
-    if (gameRef.current) {
-      gameRef.current.missionManager.startMissionById(missionId);
+    if (worldRef.current) {
+      worldRef.current.missionManager.startMissionById(missionId);
     }
   };
 
   // Spawn purchased vehicle from Dealership or Valet
   const handleSpawnCar = (type: 'sports' | 'suv' | 'sedan' | 'taxi' | 'ambulance', colorHex: number) => {
-    if (gameRef.current) {
-      gameRef.current.spawnPurchasedCar(type, colorHex);
+    if (worldRef.current) {
+      worldRef.current.spawnPurchasedCar(type, colorHex);
     }
   };
 
   // Respawn player at safehouse
   const handleRespawn = () => {
-    if (gameRef.current) {
-      gameRef.current.player.respawn(new THREE.Vector3(-10, 0, 25));
-      if (gameRef.current.currentVehicle) {
-        gameRef.current.toggleVehicle();
+    if (worldRef.current) {
+      worldRef.current.player.respawn(new THREE.Vector3(-10, 0, 25));
+      if (worldRef.current.currentVehicle) {
+        worldRef.current.toggleVehicle();
       }
       useGameStore.getState().healPlayer(100);
       useGameStore.getState().clearWantedLevel();
@@ -141,11 +141,11 @@ export default function App() {
         <HUD
           onToggleVehicle={handleToggleVehicle}
           onTouchInput={handleTouchInput}
-          onContextAction={() => gameRef.current?.triggerContextAction()}
+          onContextAction={() => worldRef.current?.triggerContextAction()}
           onPause={() => setIsPaused(true)}
-          onShoot={() => gameRef.current?.shootWeapon()}
-          onAimToggle={() => gameRef.current?.toggleAim()}
-          onReload={() => gameRef.current?.reload()}
+          onShoot={() => worldRef.current?.shootWeapon()}
+          onAimToggle={() => worldRef.current?.toggleAim()}
+          onReload={() => worldRef.current?.reload()}
         />
       )}
 

@@ -19,6 +19,14 @@ export function buildAmbulance(color: number): VehicleMeshRig {
   addBox(ctx, ctx.body, [width * 0.94, 1.42, 2.75], [0, 1.68, -0.72], white);
   addCabin(ctx, { width: 1.78, height: 0.68, length: 1.55, y: 1.14, z: 1.0 });
   for (const side of [-1, 1]) {
+    for (const windowZ of [-0.28, -1.22]) {
+      addBox(ctx, ctx.body, [0.025, 0.38, 0.66], [side * (width * 0.48), 1.88, windowZ], ctx.glassMaterial);
+    }
+  }
+  addBox(ctx, ctx.body, [0.72, 0.12, 1.72], [0, 1.04, -0.84], ctx.interiorMaterial);
+  addBox(ctx, ctx.body, [0.07, 0.18, 1.55], [-0.4, 1.19, -0.84], ctx.chromeMaterial);
+  addBox(ctx, ctx.body, [0.07, 0.18, 1.55], [0.4, 1.19, -0.84], ctx.chromeMaterial);
+  for (const side of [-1, 1]) {
     addBox(ctx, ctx.body, [0.045, 0.2, 2.55], [side * (width * 0.48), 1.1, -0.68], red);
     addBox(ctx, ctx.body, [0.06, 0.46, 0.08], [side * (width * 0.51), 1.62, -0.6], ctx.chromeMaterial);
   }

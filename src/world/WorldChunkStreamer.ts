@@ -1,5 +1,15 @@
 import * as THREE from 'three';
-import { CollisionBox, getDistrictName, getTerrainHeight, isWaterArea, WORLD_RADIUS } from './CityGenerator';
+import {
+  CollisionBox,
+  getDistrictName,
+  getTerrainHeight,
+  isAirportArea,
+  isLandmarkArea,
+  isUrbanArea,
+  isWaterArea,
+  overlapsAirportArea,
+  WORLD_RADIUS
+} from './CityGenerator';
 import { textureFactory } from './TextureGenerator';
 
 interface StreamedChunk {
@@ -99,11 +109,17 @@ export class WorldChunkStreamer {
     private readonly onCollidersChanged: () => void
   ) {}
 
-  public update(position: THREE.Vector3, isNight: boolean) {
+  public update(position: THREE.Vector3, isNight: boolean, allowChunkCreation = true): boolean {
     const chunkX = Math.floor((position.x - 60) / CHUNK_SIZE);
     const chunkZ = Math.floor((position.z - 60) / CHUNK_SIZE);
     const wanted = new Set<string>();
     let collidersChanged = false;
+    let nearestMissingChunk: {
+      key: string;
+      originX: number;
+      originZ: number;
+      distance: number;
+    } | null = null;
 
     for (let x = chunkX - CHUNK_RADIUS; x <= chunkX + CHUNK_RADIUS; x++) {
       for (let z = chunkZ - CHUNK_RADIUS; z <= chunkZ + CHUNK_RADIUS; z++) {
@@ -115,13 +131,13 @@ export class WorldChunkStreamer {
 
         const key = `${x}:${z}`;
         wanted.add(key);
-        let chunk = this.chunks.get(key);
+        const chunk = this.chunks.get(key);
         if (!chunk) {
-          chunk = this.createChunk(originX, originZ);
-          this.chunks.set(key, chunk);
-          this.scene.add(chunk.group);
-          this.colliders.push(...chunk.colliders);
-          collidersChanged = true;
+          const distance = Math.hypot(centerX - position.x, centerZ - position.z);
+          if (!nearestMissingChunk || distance < nearestMissingChunk.distance) {
+            nearestMissingChunk = { key, originX, originZ, distance };
+          }
+          continue;
         }
 
         const distance = Math.hypot(centerX - position.x, centerZ - position.z);
@@ -142,10 +158,22 @@ export class WorldChunkStreamer {
       collidersChanged = true;
     }
 
+    if (allowChunkCreation && nearestMissingChunk) {
+      const { key, originX, originZ, distance } = nearestMissingChunk;
+      const chunk = this.createChunk(originX, originZ);
+      this.chunks.set(key, chunk);
+      this.scene.add(chunk.group);
+      this.colliders.push(...chunk.colliders);
+      chunk.detail.visible = distance <= DETAIL_DISTANCE;
+      chunk.proxy.visible = distance > DETAIL_DISTANCE;
+      collidersChanged = true;
+    }
+
     if (collidersChanged) this.onCollidersChanged();
     const nightIntensity = isNight ? 1.15 : 0.08;
     this.windowMaterial.emissiveIntensity = nightIntensity;
     this.lampBulbMaterial.emissiveIntensity = isNight ? 2 : 0.05;
+    return !!(allowChunkCreation && nearestMissingChunk);
   }
 
   private disposeChunkGeometry(group: THREE.Group) {
@@ -158,6 +186,17 @@ export class WorldChunkStreamer {
     for (const geometry of geometries) geometry.dispose();
   }
 
+  private intersectsStructure(minX: number, maxX: number, minZ: number, maxZ: number): boolean {
+    return this.colliders.some(
+      (collider) =>
+        collider.type !== 'water' &&
+        minX < collider.maxX &&
+        maxX > collider.minX &&
+        minZ < collider.maxZ &&
+        maxZ > collider.minZ
+    );
+  }
+
   private createChunk(originX: number, originZ: number): StreamedChunk {
     const group = new THREE.Group();
     group.position.set(originX, 0, originZ);
@@ -165,7 +204,10 @@ export class WorldChunkStreamer {
     const detail = new THREE.Group();
     const proxy = new THREE.Group();
     const colliders: CollisionBox[] = [];
-    const district = getDistrictName(originX + CHUNK_SIZE / 2, originZ + CHUNK_SIZE / 2);
+    const chunkCenterX = originX + CHUNK_SIZE / 2;
+    const chunkCenterZ = originZ + CHUNK_SIZE / 2;
+    const district = getDistrictName(chunkCenterX, chunkCenterZ);
+    const urbanChunk = isUrbanArea(chunkCenterX, chunkCenterZ);
     const palette = paletteByDistrict.find((entry) => entry.match.test(district)) ?? {
       colors: [0xc1bba8, 0x96a8a4, 0x8c7965],
       sign: '#526a70'
@@ -180,10 +222,12 @@ export class WorldChunkStreamer {
         const worldZ = originZ + localZ;
         if (Math.abs(worldX) < 430 && Math.abs(worldZ) < 430) continue;
         if (isWaterArea(worldX, worldZ)) continue;
+        if (isAirportArea(worldX, worldZ)) continue;
+        if (isLandmarkArea(worldX, worldZ)) continue;
 
         const seed = this.seed(worldX, worldZ);
         const isVillage = /Village/i.test(district);
-        const rural = Math.max(Math.abs(worldX), Math.abs(worldZ)) > 3500;
+        const rural = !isUrbanArea(worldX, worldZ);
         if (seed % (isVillage ? 53 : rural ? 37 : 31) === 0) {
           this.addFootballPitch(detail, localX, localZ);
           continue;
@@ -196,6 +240,20 @@ export class WorldChunkStreamer {
         const isHut = type >= (isVillage ? 20 : 24) && type < (isVillage ? 72 : 40);
         const width = isHut ? 13 + seed % 8 : isRuin ? 20 + seed % 12 : isShop || isBar ? 24 + seed % 12 : 22 + seed % 18;
         const depth = isHut ? 12 + Math.floor(seed / 7) % 8 : isRuin ? 19 + Math.floor(seed / 7) % 12 : isShop || isBar ? 20 + Math.floor(seed / 7) % 12 : 20 + Math.floor(seed / 7) % 17;
+        const roadSpacing = urbanChunk ? 100 : 400;
+        const nearestRoadX = Math.round((worldX - 60) / roadSpacing) * roadSpacing + 60;
+        const nearestRoadZ = Math.round((worldZ - 60) / roadSpacing) * roadSpacing + 60;
+        const halfRoadClearance = 10.75;
+        const minX = worldX - width / 2 - 1;
+        const maxX = worldX + width / 2 + 1;
+        const minZ = worldZ - depth / 2 - 1;
+        const maxZ = worldZ + depth / 2 + 1;
+        if (
+          Math.abs(worldX - nearestRoadX) < width / 2 + halfRoadClearance ||
+          Math.abs(worldZ - nearestRoadZ) < depth / 2 + halfRoadClearance ||
+          this.intersectsStructure(minX, maxX, minZ, maxZ)
+        ) continue;
+
         const height = this.getBuildingHeight(district, seed);
         const color = palette.colors[seed % palette.colors.length];
         const material = this.getBuildingMaterial(color);
@@ -225,10 +283,10 @@ export class WorldChunkStreamer {
         proxy.add(silhouette);
 
         colliders.push({
-          minX: worldX - width / 2 - 1,
-          maxX: worldX + width / 2 + 1,
-          minZ: worldZ - depth / 2 - 1,
-          maxZ: worldZ + depth / 2 + 1,
+          minX,
+          maxX,
+          minZ,
+          maxZ,
           name: district,
           type: 'building'
         });
@@ -403,7 +461,8 @@ export class WorldChunkStreamer {
   }
 
   private addRoads(group: THREE.Group, originX: number, originZ: number) {
-    const rural = Math.max(Math.abs(originX + CHUNK_SIZE / 2), Math.abs(originZ + CHUNK_SIZE / 2)) > 3500;
+    if (overlapsAirportArea(originX, originZ, CHUNK_SIZE)) return;
+    const rural = !isUrbanArea(originX + CHUNK_SIZE / 2, originZ + CHUNK_SIZE / 2);
     const horizontalCoords = rural
       ? (Math.abs(Math.round(originZ / CHUNK_SIZE)) % 2 === 0 ? [0] : [])
       : [0, 100];
@@ -420,7 +479,13 @@ export class WorldChunkStreamer {
         originX + CHUNK_SIZE >= -550;
       const elevation = getTerrainHeight(originX + 100, originZ + coordinate);
 
-      if (!horizontalInWater) {
+      const horizontalOverlapsStructure = this.intersectsStructure(
+        originX,
+        originX + CHUNK_SIZE,
+        originZ + coordinate - 10.75,
+        originZ + coordinate + 10.75
+      );
+      if (!horizontalInWater && !horizontalOverlapsStructure) {
         for (const offset of rural ? [] : [-9, 9]) {
           const sidewalk = new THREE.Mesh(this.unitPlane, this.sidewalkMaterial);
           sidewalk.rotation.x = -Math.PI / 2;
@@ -457,7 +522,13 @@ export class WorldChunkStreamer {
         originZ <= 540 &&
         originZ + CHUNK_SIZE >= 360;
       const onBridgeRoad = verticalX >= 148 && verticalX <= 172;
-      if (!verticalCrossesWater || onBridgeRoad) {
+      const verticalOverlapsStructure = this.intersectsStructure(
+        verticalX - 10.75,
+        verticalX + 10.75,
+        originZ,
+        originZ + CHUNK_SIZE
+      );
+      if ((!verticalCrossesWater || onBridgeRoad) && !verticalOverlapsStructure) {
         for (const offset of rural ? [] : [-9, 9]) {
           const sidewalk = new THREE.Mesh(this.unitPlane, this.sidewalkMaterial);
           sidewalk.rotation.x = -Math.PI / 2;

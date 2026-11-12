@@ -6,6 +6,21 @@ import { getVehicleRules } from './models';
 import { VehicleConfig, VehicleMeshRig, VehicleRules } from './types';
 export type { VehicleConfig } from './types';
 
+interface VehicleDebris {
+  object: THREE.Object3D;
+  velocity: THREE.Vector3;
+  angularVelocity: THREE.Vector3;
+  groundY: number;
+  lifetime: number;
+}
+
+interface PaintMaterialState {
+  material: THREE.MeshStandardMaterial | THREE.MeshPhysicalMaterial;
+  color: THREE.Color;
+  roughness: number;
+  metalness: number;
+}
+
 export class Vehicle {
   public group: THREE.Group;
   public rig: VehicleMeshRig;
@@ -41,6 +56,8 @@ export class Vehicle {
   // Visual body roll & pitch
   private bodyRoll = 0;
   private bodyPitch = 0;
+  private terrainPitch = 0;
+  private terrainRoll = 0;
   private wheelSpinAngle = 0;
   private rules: VehicleRules;
   private collisionCooldown = 0;
@@ -49,6 +66,12 @@ export class Vehicle {
   private smokeClock = 0;
   private explosionMesh: THREE.Mesh | null = null;
   private explosionClock = 0;
+  private fire: THREE.Points | null = null;
+  private fireClock = 0;
+  private readonly fireDuration = 180;
+  private readonly debris: VehicleDebris[] = [];
+  private readonly hiddenDamageParts: THREE.Object3D[] = [];
+  private readonly paintMaterialStates: PaintMaterialState[];
   private readonly baseAcceleration: number;
   private readonly baseMaxSpeed: number;
   private readonly underglow: THREE.Mesh;
@@ -68,6 +91,24 @@ export class Vehicle {
     this.rig = modelFactory.createVehicle(config.type, config.colorHex);
     this.features = this.rig.features;
     this.group = this.rig.group;
+    const paintMaterials = new Set<THREE.MeshStandardMaterial | THREE.MeshPhysicalMaterial>([
+      this.rig.bodyMaterial
+    ]);
+    this.rig.body.traverse((child) => {
+      if (!(child instanceof THREE.Mesh) || child.userData.paintable !== true) return;
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      for (const material of materials) {
+        if (material instanceof THREE.MeshStandardMaterial || material instanceof THREE.MeshPhysicalMaterial) {
+          paintMaterials.add(material);
+        }
+      }
+    });
+    this.paintMaterialStates = [...paintMaterials].map((material) => ({
+      material,
+      color: material.color.clone(),
+      roughness: material.roughness,
+      metalness: material.metalness
+    }));
     this.position = startPos.clone();
     this.group.position.copy(startPos);
     this.heading = startHeading;
@@ -212,6 +253,12 @@ export class Vehicle {
       this.steerAngle = 0;
     }
 
+    const speedLimit = Math.max(14, this.config.maxSpeed * 1.35);
+    this.speed = THREE.MathUtils.clamp(this.speed, -speedLimit, speedLimit);
+    if (!Number.isFinite(this.speed)) {
+      this.speed = 0;
+    }
+
     this.group.rotation.y = this.heading;
 
     // 4. Update velocity and position
@@ -312,12 +359,32 @@ export class Vehicle {
     const forwardZ = Math.cos(this.heading);
     const rightX = Math.cos(this.heading);
     const rightZ = -Math.sin(this.heading);
-    const groundAhead = getTerrainHeight(this.position.x + forwardX * 2, this.position.z + forwardZ * 2);
-    const groundBehind = getTerrainHeight(this.position.x - forwardX * 2, this.position.z - forwardZ * 2);
-    const groundLeft = getTerrainHeight(this.position.x - rightX * 2, this.position.z - rightZ * 2);
-    const groundRight = getTerrainHeight(this.position.x + rightX * 2, this.position.z + rightZ * 2);
-    this.group.rotation.x = Math.atan2(groundAhead - groundBehind, 4);
-    this.group.rotation.z = Math.atan2(groundLeft - groundRight, 4);
+    const terrainSampleDistance = Math.max(2.4, this.rules.collisionRadius * 1.1);
+    const groundAhead = getTerrainHeight(
+      this.position.x + forwardX * terrainSampleDistance,
+      this.position.z + forwardZ * terrainSampleDistance
+    );
+    const groundBehind = getTerrainHeight(
+      this.position.x - forwardX * terrainSampleDistance,
+      this.position.z - forwardZ * terrainSampleDistance
+    );
+    const groundLeft = getTerrainHeight(
+      this.position.x - rightX * terrainSampleDistance,
+      this.position.z - rightZ * terrainSampleDistance
+    );
+    const groundRight = getTerrainHeight(
+      this.position.x + rightX * terrainSampleDistance,
+      this.position.z + rightZ * terrainSampleDistance
+    );
+    const terrainBlend = Math.min(1, dt * 9);
+    this.terrainPitch += (
+      Math.atan2(groundAhead - groundBehind, terrainSampleDistance * 2) - this.terrainPitch
+    ) * terrainBlend;
+    this.terrainRoll += (
+      Math.atan2(groundLeft - groundRight, terrainSampleDistance * 2) - this.terrainRoll
+    ) * terrainBlend;
+    this.group.rotation.x = this.terrainPitch;
+    this.group.rotation.z = this.terrainRoll;
 
     // 5. Per-wheel suspension, tire temperature/wear and independent wheel spin.
     this.wheelSpinAngle += (this.speed / this.rules.wheelRadius) * dt;
@@ -375,6 +442,14 @@ export class Vehicle {
     this.rig.animate?.(dt, this.speed, input);
     if (this.rig.steeringWheel) {
       this.rig.steeringWheel.rotation.z = -this.steerAngle * 2.2;
+    }
+    if (this.rig.speedNeedle) {
+      const speedRatio = THREE.MathUtils.clamp(Math.abs(this.speed) / this.config.maxSpeed, 0, 1);
+      this.rig.speedNeedle.rotation.z = THREE.MathUtils.lerp(-2.35, 2.35, speedRatio);
+    }
+    if (this.rig.rpmNeedle) {
+      const rpmRatio = THREE.MathUtils.clamp((this.rpm - 1000) / 6500, 0, 1);
+      this.rig.rpmNeedle.rotation.z = THREE.MathUtils.lerp(-2.35, 2.35, rpmRatio);
     }
 
     // 7. Brake Lights & Taillights
@@ -450,6 +525,17 @@ export class Vehicle {
       this.isDestroyed = true;
       this.speed = 0;
       this.explosionClock = 0;
+      this.fireClock = 0;
+      for (const state of this.paintMaterialStates) {
+        state.material.color.setRGB(0.055, 0.055, 0.055);
+        state.material.roughness = 0.94;
+        state.material.metalness = 0.04;
+      }
+      for (const wheel of this.rig.wheels) this.spawnDebris(wheel, 5);
+      for (const mirror of this.rig.damageParts.mirrors) this.spawnDebris(mirror, 3.2);
+      for (const window of this.rig.damageParts.windows.slice(0, 4)) this.spawnDebris(window, 2.4);
+      this.createFire();
+      (this.smoke.material as THREE.PointsMaterial).color.setHex(0x252321);
       const material = new THREE.MeshBasicMaterial({
         color: 0xff7a1a,
         transparent: true,
@@ -465,7 +551,8 @@ export class Vehicle {
   }
 
   public updateDamageEffects(dt: number) {
-    this.smoke.visible = this.health < this.config.healthMax * 0.65;
+    this.smoke.visible = this.health < this.config.healthMax * 0.65 &&
+      (!this.isDestroyed || this.fireClock < this.fireDuration);
     if (this.smoke.visible) {
       this.smokeClock += dt;
       for (let i = 0; i < this.smokePositions.length; i += 3) {
@@ -475,7 +562,56 @@ export class Vehicle {
         this.smokePositions[i + 2] = Math.cos(this.smokeClock * 1.3 + i) * 0.2;
       }
       this.smoke.geometry.attributes.position.needsUpdate = true;
-      (this.smoke.material as THREE.PointsMaterial).opacity = this.health < this.config.healthMax * 0.3 ? 0.65 : 0.3;
+      const smokeMaterial = this.smoke.material as THREE.PointsMaterial;
+      const baseOpacity = this.health < this.config.healthMax * 0.3 ? 0.65 : 0.3;
+      smokeMaterial.opacity = this.isDestroyed
+        ? baseOpacity * Math.max(0, 1 - this.fireClock / this.fireDuration)
+        : baseOpacity;
+    }
+
+    for (let index = this.debris.length - 1; index >= 0; index--) {
+      const part = this.debris[index];
+      part.lifetime -= dt;
+      part.velocity.y -= 9.8 * dt;
+      part.object.position.addScaledVector(part.velocity, dt);
+      part.object.rotation.x += part.angularVelocity.x * dt;
+      part.object.rotation.y += part.angularVelocity.y * dt;
+      part.object.rotation.z += part.angularVelocity.z * dt;
+      if (part.object.position.y < part.groundY) {
+        part.object.position.y = part.groundY;
+        part.velocity.y = Math.abs(part.velocity.y) > 1
+          ? -part.velocity.y * 0.24
+          : 0;
+        part.velocity.x *= 0.62;
+        part.velocity.z *= 0.62;
+      }
+      if (part.lifetime <= 0) {
+        part.object.parent?.remove(part.object);
+        this.debris.splice(index, 1);
+      }
+    }
+
+    if (this.fire) {
+      this.fireClock += dt;
+      const positions = this.fire.geometry.attributes.position.array as Float32Array;
+      for (let index = 0; index < positions.length; index += 3) {
+        const particle = index / 3;
+        const phase = (this.fireClock * 1.4 + particle * 0.31) % 1;
+        positions[index] = Math.sin(this.fireClock * 3.2 + particle * 1.7) * (0.18 + phase * 0.2);
+        positions[index + 1] = phase * 2.1;
+        positions[index + 2] = Math.cos(this.fireClock * 2.7 + particle * 1.3) * 0.2;
+      }
+      this.fire.geometry.attributes.position.needsUpdate = true;
+      (this.fire.material as THREE.PointsMaterial).opacity = Math.min(
+        1,
+        Math.max(0, (this.fireDuration - this.fireClock) / 30)
+      );
+      if (this.fireClock >= this.fireDuration) {
+        this.group.remove(this.fire);
+        this.fire.geometry.dispose();
+        (this.fire.material as THREE.Material).dispose();
+        this.fire = null;
+      }
     }
 
     if (this.explosionMesh) {
@@ -539,14 +675,129 @@ export class Vehicle {
   public repair(colorHex?: number) {
     this.health = this.config.healthMax;
     this.isDestroyed = false;
+    this.clearDamageEffects();
+    this.config.colorHex = colorHex ?? this.config.colorHex;
+    for (const state of this.paintMaterialStates) {
+      state.material.color.copy(state.color);
+      state.material.roughness = state.roughness;
+      state.material.metalness = state.metalness;
+    }
     if (colorHex !== undefined) {
-      this.config.colorHex = colorHex;
-      // Respray body material
-      const bodyMat = this.rig.body.children[1]?.children?.[0] as THREE.Mesh;
-      if (bodyMat && (bodyMat.material as THREE.MeshStandardMaterial)) {
-        (bodyMat.material as THREE.MeshStandardMaterial).color.setHex(colorHex);
+      this.rig.body.traverse((child) => {
+        if (!(child instanceof THREE.Mesh)) return;
+        const material = child.material;
+        if (Array.isArray(material)) {
+          for (const entry of material) {
+            if (entry instanceof THREE.MeshStandardMaterial || entry instanceof THREE.MeshPhysicalMaterial) {
+              entry.color.setHex(colorHex);
+            }
+          }
+          return;
+        }
+        if (
+          (material instanceof THREE.MeshStandardMaterial || material instanceof THREE.MeshPhysicalMaterial) &&
+          child.userData.paintable === true
+        ) {
+          material.color.setHex(colorHex);
+        }
+      });
+      for (const state of this.paintMaterialStates) {
+        state.color.copy(state.material.color);
       }
     }
+    this.tireHealth.fill(100);
+    this.tireWear.fill(0);
+    for (const wheel of this.rig.wheels) {
+      const tire = wheel.children[0]?.children[0] as THREE.Mesh | undefined;
+      if (tire) tire.scale.set(1, 1, 1);
+    }
+    (this.smoke.material as THREE.PointsMaterial).color.setHex(0x55585b);
+    (this.smoke.material as THREE.PointsMaterial).opacity = 0.35;
+    this.smoke.visible = false;
+    this.smokeClock = 0;
+    this.explosionClock = 0;
+    this.fireClock = 0;
+  }
+
+  public getInteriorCameraPosition() {
+    return this.rig.body.localToWorld(this.rig.interiorCameraPosition.clone());
+  }
+
+  private spawnDebris(source: THREE.Object3D, intensity: number) {
+    const parent = source.parent;
+    if (!parent || !source.visible) return;
+    const object = source.clone(true);
+    parent.add(object);
+    source.visible = false;
+    this.hiddenDamageParts.push(source);
+    this.debris.push({
+      object,
+      velocity: new THREE.Vector3(
+        (Math.random() - 0.5) * intensity,
+        1.8 + Math.random() * intensity * 0.55,
+        (Math.random() - 0.5) * intensity
+      ),
+      angularVelocity: new THREE.Vector3(
+        (Math.random() - 0.5) * 12,
+        (Math.random() - 0.5) * 12,
+        (Math.random() - 0.5) * 12
+      ),
+      groundY: typeof source.userData.baseRideHeight === 'number'
+        ? source.userData.baseRideHeight
+        : 0.12,
+      lifetime: typeof source.userData.baseRideHeight === 'number'
+        ? 6 + Math.random() * 2
+        : source.name === 'vehicle-window'
+          ? 3.5 + Math.random() * 1.5
+          : 4 + Math.random() * 2
+    });
+  }
+
+  private createFire() {
+    const particleCount = 14;
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(particleCount * 3);
+    const colors = new Float32Array(particleCount * 3);
+    for (let index = 0; index < particleCount; index++) {
+      const color = new THREE.Color().setHSL(0.035 + (index % 4) * 0.018, 1, 0.5 + (index % 3) * 0.12);
+      color.toArray(colors, index * 3);
+    }
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 1, 0), 3.5);
+    this.fire = new THREE.Points(
+      geometry,
+      new THREE.PointsMaterial({
+        size: 0.9,
+        vertexColors: true,
+        transparent: true,
+        opacity: 1,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        sizeAttenuation: true
+      })
+    );
+    this.fire.position.set(0, 0.75, 0.3);
+    this.group.add(this.fire);
+  }
+
+  private clearDamageEffects() {
+    if (this.explosionMesh) {
+      this.group.remove(this.explosionMesh);
+      this.explosionMesh.geometry.dispose();
+      (this.explosionMesh.material as THREE.Material).dispose();
+      this.explosionMesh = null;
+    }
+    if (this.fire) {
+      this.group.remove(this.fire);
+      this.fire.geometry.dispose();
+      (this.fire.material as THREE.Material).dispose();
+      this.fire = null;
+    }
+    for (const part of this.debris) part.object.parent?.remove(part.object);
+    this.debris.length = 0;
+    for (const original of this.hiddenDamageParts) original.visible = true;
+    this.hiddenDamageParts.length = 0;
   }
 
   public refuel() {

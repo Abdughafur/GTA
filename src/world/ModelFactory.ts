@@ -234,17 +234,29 @@ export class ModelFactory {
     root.add(leftLeg, rightLeg);
 
     const firstPersonArms = new THREE.Group();
-    firstPersonArms.position.set(0, -0.1, -0.8);
+    firstPersonArms.position.set(0, -0.25, -0.95);
+    firstPersonArms.scale.setScalar(0.82);
     const viewmodelSleeveMat = clothMat.clone();
     const viewmodelHandMat = skinMat.clone();
     for (const side of [-1, 1]) {
-      const forearm = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.48, 0.13), viewmodelSleeveMat);
-      forearm.position.set(side * 0.2, -0.2, -0.08);
-      forearm.rotation.x = -0.65;
+      const forearm = new THREE.Mesh(new THREE.CapsuleGeometry(0.065, 0.36, 4, 8), viewmodelSleeveMat);
+      forearm.name = side < 0 ? 'first-person-left-sleeve' : 'first-person-right-sleeve';
+      forearm.position.set(side * 0.23, -0.29, -0.04);
+      forearm.rotation.set(-0.72, 0, side * 0.28);
       firstPersonArms.add(forearm);
-      const palm = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.13, 0.12), viewmodelHandMat);
-      palm.position.set(side * 0.2, -0.02, -0.23);
-      firstPersonArms.add(palm);
+      const hand = new THREE.Group();
+      hand.name = side < 0 ? 'first-person-left-hand' : 'first-person-right-hand';
+      hand.position.set(side * 0.14, -0.09, -0.31);
+      hand.rotation.x = -0.5;
+      const palm = new THREE.Mesh(new THREE.CapsuleGeometry(0.052, 0.075, 3, 6), viewmodelHandMat);
+      palm.rotation.z = Math.PI / 2;
+      const knuckles = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.045, 0.055), viewmodelHandMat);
+      knuckles.position.set(0, 0.045, -0.015);
+      const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(0.022, 0.05, 2, 5), viewmodelHandMat);
+      thumb.position.set(side * 0.065, -0.005, -0.03);
+      thumb.rotation.z = side * 0.7;
+      hand.add(palm, knuckles, thumb);
+      firstPersonArms.add(hand);
     }
     let watchTexture: THREE.CanvasTexture | null = null;
     if (appearance?.watch) {

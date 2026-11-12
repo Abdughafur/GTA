@@ -12,6 +12,7 @@ export function buildMotorcycle(color: number): VehicleMeshRig {
   const ctx = createVehicleBuildContext('motorcycle', color, {
     width: 0.9, length: 2.55, height: 1.55, wheelBase: 1.75, trackWidth: 0.72, wheelRadius: 0.38
   });
+  ctx.interiorCameraPosition.set(0, 1.52, 0.3);
   const { body, bodyMaterial, trimMaterial, chromeMaterial } = ctx;
   const tank = new THREE.Mesh(new THREE.SphereGeometry(0.5, 16, 12), bodyMaterial);
   tank.scale.set(0.52, 0.47, 0.95);
@@ -52,8 +53,41 @@ export function buildMotorcycle(color: number): VehicleMeshRig {
   handlebar.rotation.z = Math.PI / 2;
   handlebar.position.set(0, 1.34, 0.72);
   fork.add(handlebar);
+  for (const side of [-1, 1]) {
+    const mirrorStem = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.018, 0.22, 6), chromeMaterial);
+    mirrorStem.position.set(side * 0.39, 1.47, 0.69);
+    mirrorStem.rotation.z = side * 0.35;
+    fork.add(mirrorStem);
+    const mirror = new THREE.Mesh(new THREE.SphereGeometry(0.065, 8, 6), trimMaterial);
+    mirror.scale.set(0.55, 1, 0.75);
+    mirror.position.set(side * 0.43, 1.57, 0.66);
+    mirror.name = 'vehicle-mirror';
+    ctx.damageParts.mirrors.push(mirror);
+    fork.add(mirror);
+  }
   fork.position.z = -0.05;
   body.add(fork);
+
+  const instrumentHousing = new THREE.Mesh(
+    new THREE.BoxGeometry(0.28, 0.09, 0.08),
+    trimMaterial
+  );
+  instrumentHousing.position.set(0, 1.32, 0.47);
+  body.add(instrumentHousing);
+  const instrumentScreen = new THREE.Mesh(
+    new THREE.BoxGeometry(0.21, 0.055, 0.012),
+    new THREE.MeshStandardMaterial({
+      color: 0x071827,
+      emissive: 0x07384e,
+      emissiveIntensity: 0.9,
+      roughness: 0.24
+    })
+  );
+  instrumentScreen.position.set(0, 1.33, 0.516);
+  body.add(instrumentScreen);
+  const speedNeedle = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.035, 0.008), chromeMaterial);
+  speedNeedle.position.set(0, 1.33, 0.525);
+  body.add(speedNeedle);
 
   const windscreen = new THREE.Mesh(
     new THREE.SphereGeometry(0.5, 16, 12),
@@ -65,6 +99,7 @@ export function buildMotorcycle(color: number): VehicleMeshRig {
   addWheels(ctx, [[0, 0.89], [0, -0.86]]);
 
   const rig = finishVehicleModel(ctx, ['two-wheel chassis', 'steerable front fork', 'motorcycle cockpit', 'leaning corner animation']);
+  rig.speedNeedle = speedNeedle;
   rig.animate = (dt, speed, input) => {
     fork.rotation.y = THREE.MathUtils.damp(fork.rotation.y, -input.steer * 0.38, 7, dt);
     body.rotation.z = THREE.MathUtils.damp(body.rotation.z, -input.steer * Math.min(Math.abs(speed) / 42, 0.42), 4, dt);

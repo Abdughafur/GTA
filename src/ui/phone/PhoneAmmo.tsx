@@ -27,6 +27,14 @@ const ammoCatalog = [
     icon: <Shield className="h-5 w-5" />,
     color: 'ammo-accent-amber',
     ...AMMO_PACKS.rifle,
+  },
+  {
+    id: 'sniper',
+    name: '.308 precision rounds',
+    weapon: 'Precision Sniper Rifle',
+    icon: <Crosshair className="h-5 w-5" />,
+    color: 'ammo-accent-rose',
+    ...AMMO_PACKS.sniper,
   }
 ] as const;
 
@@ -76,7 +84,7 @@ export const PhoneAmmo: React.FC = () => {
 
         <div className="ammo-section-label">
           <span>AMMUNITION</span>
-          <span>3 PACKS</span>
+          <span>4 PACKS</span>
         </div>
 
         {ammoCatalog.map((item) => {

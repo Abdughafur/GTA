@@ -53,7 +53,7 @@ export class MissionManager {
       client: 'Anonymous Caller',
       description: 'Survive the 3-star police manhunt and reach Pay & Spray to clear heat.',
       reward: 3500,
-      targetPos: [90, 0, 28],
+      targetPos: [110, 0, 28],
       type: 'evade',
       timeLimit: 60
     },
@@ -85,7 +85,7 @@ export class MissionManager {
       client: 'Rafi Cole',
       description: 'Deliver the boxed garage parts to Pay ‘n’ Spray. A duplicate ledger page hidden in the crate could implicate both sides.',
       reward: 1100,
-      targetPos: [90, 0, 28],
+      targetPos: [110, 0, 28],
       type: 'delivery',
       timeLimit: 120,
       pickupPos: [-110, 0, 160],
@@ -95,9 +95,9 @@ export class MissionManager {
       id: 'story_04',
       title: 'Runway Frequency',
       client: 'Nora Vale',
-      description: 'Meet the night dispatcher at Vice Bay Airport and collect the flight envelope.',
+      description: 'Meet the night dispatcher at Northgate International Airport and collect the flight envelope.',
       reward: 1700,
-      targetPos: [325, 0, -185],
+      targetPos: [0, 0, -3366],
       type: 'reach',
       storyChapter: 4
     },
@@ -107,7 +107,7 @@ export class MissionManager {
       client: 'Old Ben Carter',
       description: 'Check the farm gate and make sure Ben’s livestock made it back to the barn.',
       reward: 1250,
-      targetPos: [363, 0, 145],
+      targetPos: [332, 0, 125],
       type: 'reach',
       timeLimit: 180,
       storyChapter: 5
@@ -140,7 +140,7 @@ export class MissionManager {
       targetPos: [48, 0, 40],
       type: 'delivery',
       timeLimit: 150,
-      pickupPos: [325, 0, -185],
+      pickupPos: [0, 0, -3366],
       storyChapter: 7
     },
     {
@@ -156,7 +156,7 @@ export class MissionManager {
       totalCheckpoints: 4,
       checkpoints: [
         [128, 0, 10],
-        [90, 0, 28],
+        [110, 0, 28],
         [-110, 0, 160],
         [48, 0, 40]
       ],

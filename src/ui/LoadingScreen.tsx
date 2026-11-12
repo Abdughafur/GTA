@@ -49,7 +49,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ onStartGame }) => 
         <div className="flex items-center gap-3">
           <span className="h-7 w-px bg-rose-500" />
           <div>
-            <div className="font-game text-[11px] font-bold uppercase tracking-[0.3em] text-white">BlockGTA</div>
+            <div className="font-game text-[11px] font-bold uppercase tracking-[0.3em] text-white">CanvasWorld</div>
             <div className="mt-0.5 text-[9px] uppercase tracking-[0.24em] text-white/50">Vice Bay</div>
           </div>
         </div>
@@ -62,7 +62,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ onStartGame }) => 
             Welcome to Vice Bay
           </div>
           <h1 className="font-game text-6xl font-black uppercase leading-[0.9] tracking-[-0.07em] text-white drop-shadow-2xl sm:text-8xl lg:text-9xl">
-            BlockGTA
+            CanvasWorld
           </h1>
           <div className="mt-5 text-xs font-medium uppercase tracking-[0.3em] text-rose-300 sm:text-sm">
             The city is yours

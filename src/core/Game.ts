@@ -17,7 +17,7 @@ import { transitSystem } from '../world/TransitSystem';
 import { WorldChunkStreamer } from '../world/WorldChunkStreamer';
 import { CollisionGrid } from '../world/CollisionGrid';
 
-export class Game {
+export class CanvasWorld {
   public scene: THREE.Scene;
   public cameraController: CameraController;
   public renderer: THREE.WebGLRenderer;
@@ -57,7 +57,13 @@ export class Game {
   private readonly fixedStep = 1 / 60;
   private isRunning = false;
   private isSoftwareGl = false;
+  private lastRenderTime = 0;
   private firstPersonViewmodelRoot = new THREE.Group();
+  private chunkGenerationBudget = 0;
+  private readonly lowPowerDevice: boolean;
+
+  // Backward-compatible alias for older imports.
+  static readonly Game = CanvasWorld;
 
   // Input states
   public keys: { [key: string]: boolean } = {};
@@ -91,16 +97,29 @@ export class Game {
         return false;
       }
     })();
+    const hardwareConcurrency = navigator.hardwareConcurrency || 0;
+    const deviceMemory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+    this.lowPowerDevice = this.isSoftwareGl ||
+      (hardwareConcurrency > 0 && hardwareConcurrency <= 4) ||
+      (deviceMemory !== undefined && deviceMemory <= 4);
+    if (this.lowPowerDevice && useGameStore.getState().graphicsQuality !== 'low') {
+      useGameStore.getState().setGraphicsQuality('low');
+    }
 
     // 1. Renderer Setup
+    const initialQuality = useGameStore.getState().graphicsQuality;
     this.renderer = new THREE.WebGLRenderer({
-      antialias: !this.isSoftwareGl,
-      powerPreference: 'high-performance'
+      antialias: !this.isSoftwareGl && initialQuality !== 'low',
+      powerPreference: initialQuality === 'low' ? 'low-power' : 'high-performance'
     });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.15;
-    this.renderer.setPixelRatio(this.isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(
+      this.isSoftwareGl
+        ? 1
+        : Math.min(window.devicePixelRatio || 1, initialQuality === 'low' ? 0.75 : 1.25)
+    );
     this.renderer.shadowMap.enabled = !this.isSoftwareGl;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.setSize(container.clientWidth, container.clientHeight);
@@ -115,6 +134,7 @@ export class Game {
 
     // 3. Initialize Game Systems
     this.initSystems();
+    this.applyAdaptivePerformancePreset();
     this.applyGraphicsQuality();
 
     // 4. Bind Events
@@ -376,6 +396,7 @@ export class Game {
       if (e.code === 'Digit3') useGameStore.getState().selectWeapon('pistol');
       if (e.code === 'Digit4') useGameStore.getState().selectWeapon('smg');
       if (e.code === 'Digit5') useGameStore.getState().selectWeapon('rifle');
+      if (e.code === 'Digit6') useGameStore.getState().selectWeapon('sniper');
 
       // Radio Station on 'KeyR' in Vehicle / Weapon Reload on Foot
       if (e.code === 'KeyR') {
@@ -547,9 +568,9 @@ export class Game {
       return;
     }
 
-    // 3. Airplane Entry Check (< 6.5m)
-    const planeDist = this.player.position.distanceTo(transitSystem.planePos);
-    if (planeDist < 6.5) {
+    // Board at the aircraft's side door rather than measuring from its center.
+    const planeDist = this.player.position.distanceTo(transitSystem.getPlaneEntryPosition());
+    if (planeDist < 4.5) {
       transitSystem.isPlayerFlyingPlane = true;
       store.setIsInPlane(true);
       this.player.group.visible = false;
@@ -576,7 +597,7 @@ export class Game {
     // 4. Carjacking Check: Traffic car with driver within 4.5m
     const trafficCar = this.trafficManager.trafficCars.find(
       (c: TrafficCarAI) =>
-        c.vehicle.position.distanceTo(this.player.position) < 4.5 &&
+        c.vehicle.position.distanceTo(this.player.position) < 3.6 &&
         c.hasDriver &&
         !c.vehicle.isDestroyed
     );
@@ -615,7 +636,7 @@ export class Game {
 
     // 5. Normal Empty Car Entry Check (< 4.5m)
     let closestVeh: Vehicle | null = null;
-    let minDist = 4.5;
+    let minDist = 3.6;
 
     const allVehicles = [
       ...this.vehicles,
@@ -691,6 +712,8 @@ export class Game {
     // A. MELEE / FISTS COMBAT
     if (currentWep === 'fists' || currentWep === 'knife') {
       audioManager.playBulletImpact();
+      this.player.triggerAttack(true);
+      this.cameraController.applyRecoil(0.035);
       let hit = false;
       const meleeDamage = currentWep === 'knife' ? 45 : 35;
       const meleeRange = currentWep === 'knife' ? 2.4 : 2.8;
@@ -740,7 +763,14 @@ export class Game {
     } else if (currentWep === 'rifle') {
       audioManager.playRifleShot();
       damage = 65;
+    } else if (currentWep === 'sniper') {
+      audioManager.playRifleShot();
+      damage = 100;
     }
+    this.player.triggerAttack(false);
+    this.cameraController.applyRecoil(
+      currentWep === 'rifle' ? 0.075 : currentWep === 'pistol' ? 0.045 : 0.025
+    );
 
     // Camera center crosshair raycast into 3D world
     const raycaster = new THREE.Raycaster();
@@ -759,7 +789,8 @@ export class Game {
       for (const officer of cruiser.officers) {
         if (!officer.isDeployed || officer.isDead) continue;
         const hits = raycaster.intersectObject(officer.group, true);
-        if (hits.length > 0 && hits[0].distance < 90 && hits[0].distance < vehicleOcclusionDistance) {
+        const weaponRange = currentWep === 'sniper' ? 260 : 90;
+        if (hits.length > 0 && hits[0].distance < weaponRange && hits[0].distance < vehicleOcclusionDistance) {
           hitPoint = hits[0].point;
           const killed = officer.takeDamage(damage);
           audioManager.playBulletImpact();
@@ -779,7 +810,8 @@ export class Game {
       for (const ped of this.pedestrianManager.pedestrians) {
         if (ped.isDead) continue;
         const hits = raycaster.intersectObject(ped.group, true);
-        if (hits.length > 0 && hits[0].distance < 90 && hits[0].distance < vehicleOcclusionDistance) {
+        const weaponRange = currentWep === 'sniper' ? 260 : 90;
+        if (hits.length > 0 && hits[0].distance < weaponRange && hits[0].distance < vehicleOcclusionDistance) {
           hitPoint = hits[0].point;
           const killed = ped.takeDamage(damage);
           audioManager.playBulletImpact();
@@ -799,7 +831,7 @@ export class Game {
       const allVehicles = this.getAllVehicles();
       for (const veh of allVehicles) {
         const hits = raycaster.intersectObject(veh.group, true);
-        if (hits.length > 0 && hits[0].distance < 90) {
+        if (hits.length > 0 && hits[0].distance < (currentWep === 'sniper' ? 260 : 90)) {
           hitPoint = hits[0].point;
           veh.applyDamage(damage * 0.4);
           audioManager.playBulletImpact();
@@ -917,7 +949,7 @@ export class Game {
     const rawDt = (now - this.lastTime) / 1000;
     this.lastTime = now;
     this.simulationAccumulator += Math.min(rawDt, 0.1);
-
+    this.chunkGenerationBudget = 1;
     this.applyGraphicsQuality();
     let steps = 0;
     while (this.simulationAccumulator >= this.fixedStep && steps < 6) {
@@ -934,7 +966,12 @@ export class Game {
     for (const vehicle of this.getAllVehicles()) {
       vehicle.setRenderAlpha(renderAlpha);
     }
-    this.renderer.render(this.scene, this.cameraController.camera);
+    const quality = useGameStore.getState().graphicsQuality;
+    const renderInterval = quality === 'low' ? 1 / 30 : quality === 'medium' ? 1 / 45 : 0;
+    if (!renderInterval || now - this.lastRenderTime >= renderInterval * 1000) {
+      this.renderer.render(this.scene, this.cameraController.camera);
+      this.lastRenderTime = now;
+    }
 
     if (this.isSoftwareGl) {
       this.afterDraw(this.loop);
@@ -968,25 +1005,43 @@ export class Game {
     this.cityData.motion.oceanGeometry.computeVertexNormals();
   }
 
+  private applyAdaptivePerformancePreset() {
+    const store = useGameStore.getState();
+    if (this.isSoftwareGl) {
+      store.setGraphicsQuality('low');
+      return;
+    }
+
+    const lowPower = (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4) ||
+      ((navigator as Navigator & { deviceMemory?: number }).deviceMemory !== undefined &&
+        (navigator as Navigator & { deviceMemory?: number }).deviceMemory! <= 6) ||
+      window.innerWidth <= 1280;
+
+    if (lowPower && store.graphicsQuality === 'high') {
+      store.setGraphicsQuality('low');
+    }
+  }
+
   private applyGraphicsQuality() {
     const quality = useGameStore.getState().graphicsQuality;
     const touchMode = useGameStore.getState().touchMode;
     if (quality === this.appliedGraphicsQuality && touchMode === this.appliedTouchMode) return;
 
-    const pixelRatioCaps = { low: 1, medium: 1.25, high: 1.75, ultra: 2 };
+    const pixelRatioCaps = { low: 0.75, medium: 1, high: 1.35, ultra: 1.6 };
     const shadowSizes = touchMode
-      ? { low: 0, medium: 768, high: 1024, ultra: 1536 }
-      : { low: 0, medium: 1024, high: 2048, ultra: 3072 };
+      ? { low: 0, medium: 384, high: 768, ultra: 1024 }
+      : { low: 0, medium: 512, high: 1024, ultra: 1536 };
     this.renderer.setPixelRatio(
       this.isSoftwareGl
         ? 1
-        : Math.min(window.devicePixelRatio || 1, pixelRatioCaps[quality], touchMode ? 1.25 : 2)
+        : Math.min(window.devicePixelRatio || 1, pixelRatioCaps[quality], touchMode ? 1 : 1.6)
     );
     this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
     this.renderer.shadowMap.enabled = !this.isSoftwareGl && quality !== 'low';
     if (this.environmentSystem) {
       this.environmentSystem.dirLight.shadow.mapSize.set(shadowSizes[quality], shadowSizes[quality]);
       this.environmentSystem.dirLight.shadow.needsUpdate = true;
+      this.environmentSystem.setPerformanceQuality(quality);
     }
     this.appliedGraphicsQuality = quality;
     this.appliedTouchMode = touchMode;
@@ -1050,7 +1105,7 @@ export class Game {
       this.cameraController.update(this.player.position, null, 0, 0, dt);
       this.environmentSystem.update(store.timeOfDay, store.weather, this.player.position, dt);
       this.updateStreetLights(store.timeOfDay < 5.5 || store.timeOfDay > 19.5 || store.weather === 'night');
-      this.worldChunkStreamer.update(
+      this.updateWorldChunks(
         this.player.position,
         store.timeOfDay < 5.5 || store.timeOfDay > 19.5 || store.weather === 'night'
       );
@@ -1241,7 +1296,9 @@ export class Game {
         transitSystem.planeSpeed * 2.2,
         dt,
         true,
-        transitSystem.planePitch
+        transitSystem.planePitch,
+        false,
+        transitSystem.getPlaneCockpitCameraPosition()
       );
     } else if (transitSystem.isPlayerRidingTrain) {
       const train = transitSystem.getPlayerTrainGroup();
@@ -1269,7 +1326,11 @@ export class Game {
         this.currentVehicle ? this.currentVehicle.position : null,
         this.currentVehicle ? this.currentVehicle.heading : this.player.heading,
         this.currentVehicle ? this.currentVehicle.speed : 0,
-        dt
+        dt,
+        false,
+        0,
+        false,
+        this.currentVehicle ? this.currentVehicle.getInteriorCameraPosition() : null
       );
     }
 
@@ -1334,7 +1395,7 @@ export class Game {
     const isNight = timeOfDay < 5.5 || timeOfDay > 19.5 || store.weather === 'night';
     this.environmentSystem.update(timeOfDay, store.weather, this.player.position, dt);
     this.updateStreetLights(isNight);
-    this.worldChunkStreamer.update(this.player.position, isNight);
+    this.updateWorldChunks(this.player.position, isNight);
 
     // 9. Interactive Location Triggers (Pay 'n' Spray, Dealership, Fast Food, Gas Station, Safehouse)
     this.checkInteractiveZones();
@@ -1369,6 +1430,15 @@ export class Game {
     ];
   }
 
+  private updateWorldChunks(position: THREE.Vector3, isNight: boolean) {
+    const createdChunk = this.worldChunkStreamer.update(
+      position,
+      isNight,
+      this.chunkGenerationBudget > 0
+    );
+    if (createdChunk) this.chunkGenerationBudget--;
+  }
+
   private updateStreetLights(isNight: boolean) {
     for (const lamp of this.cityData.streetLamps) {
       const bulb = lamp.userData.bulb as THREE.Mesh | undefined;
@@ -1395,8 +1465,8 @@ export class Game {
       if (this.jobTimer >= 3.5) {
         this.jobTimer = 0;
         const stops: [number, number, number][] = [
-          [90, 0, -68],  // Dealership
-          [90, 0, 28],   // Pay 'n' Spray
+          [110, 0, -68], // Dealership
+          [110, 0, 28],  // Pay 'n' Spray
           [-10, 0, 105], // Marina Promenade
           [-80, 0, 90],  // Industrial Docks
           [20, 0, -10],  // Downtown Bank
@@ -1482,8 +1552,8 @@ export class Game {
     const store = useGameStore.getState();
     const pPos = this.player.position;
 
-    // A. Pay 'n' Spray Garage (X: 90, Z: 28)
-    const garageDist = Math.hypot(pPos.x - 90, pPos.z - 28);
+    // A. Pay 'n' Spray Garage (X: 110, Z: 28)
+    const garageDist = Math.hypot(pPos.x - 110, pPos.z - 28);
     if (garageDist < 10 && this.currentVehicle) {
       store.setInteractionPrompt("Press [F] - Pay 'n' Spray Repair & Respray ($100)");
       if (this.keys['KeyF']) {
@@ -1513,8 +1583,8 @@ export class Game {
       return;
     }
 
-    // C. Dealership Showroom (X: 90, Z: -68)
-    const dealerDist = Math.hypot(pPos.x - 90, pPos.z - -68);
+    // C. Dealership Showroom (X: 110, Z: -68)
+    const dealerDist = Math.hypot(pPos.x - 110, pPos.z - -68);
     if (dealerDist < 12) {
       store.setInteractionPrompt('Press [F] or Open Phone to Browse Legendary Motorsport');
       if (this.keys['KeyF']) {
@@ -1549,8 +1619,8 @@ export class Game {
 
     // Nearby Aircraft & Train prompts
     if (!this.currentVehicle && !transitSystem.isPlayerFlyingHeli && !transitSystem.isPlayerFlyingPlane && !transitSystem.isPlayerRidingTrain) {
-      const planeDist = this.player.position.distanceTo(transitSystem.planePos);
-      if (planeDist < 6.5) {
+      const planeDist = this.player.position.distanceTo(transitSystem.getPlaneEntryPosition());
+      if (planeDist < 4.5) {
         store.setInteractionPrompt('Press [E] to pilot Luxor Jet · [F] autopilot · [G] cruise speed');
         return;
       }
@@ -1580,28 +1650,36 @@ export class Game {
         return;
       }
     } else if (transitSystem.isPlayerFlyingPlane) {
-      store.setInteractionPrompt(
-        transitSystem.planePos.y > 0.8 || transitSystem.planeSpeed > 5
-          ? `[F] Autopilot ${transitSystem.isPlaneAutopilot ? 'ON' : 'OFF'} · [G] speed · [E] exit after landing`
-          : '[E] Exit Jet Airliner · [F] Autopilot · [G] cruise speed'
-      );
+      if (transitSystem.planePos.y < 3 && transitSystem.planeSpeed < 8) {
+        store.setInteractionPrompt(
+          '[E] Exit Jet Airliner · [F] Autopilot · [G] cruise speed'
+        );
+      } else {
+        store.setInteractionPrompt(null);
+      }
       return;
     } else if (transitSystem.isPlayerRidingTrain) {
-      store.setInteractionPrompt(
-        transitSystem.currentTrainStationIndex >= 0
-          ? `At ${transitSystem.getMetroStationName(transitSystem.currentTrainStationIndex)} · Press [E] to exit`
-          : `Line A · Destination ${transitSystem.getMetroJourneyDestinationName() ?? 'unknown'} · doors open at stations`
-      );
+      if (transitSystem.currentTrainStationIndex >= 0) {
+        store.setInteractionPrompt(
+          `At ${transitSystem.getMetroStationName(transitSystem.currentTrainStationIndex)} · Press [E] to exit`
+        );
+      } else {
+        store.setInteractionPrompt(null);
+      }
       return;
     } else if (transitSystem.isPlayerFlyingHeli) {
-      store.setInteractionPrompt('Press [E] to Land & Exit Helicopter');
+      if (transitSystem.heliPos.y < 3.5 && transitSystem.heliVelocity.length() < 2) {
+        store.setInteractionPrompt('Press [E] to Land & Exit Helicopter');
+      } else {
+        store.setInteractionPrompt(null);
+      }
       return;
     }
 
     // Nearby Car or Carjack prompt
     if (!this.currentVehicle) {
       const trafficCar = this.trafficManager.trafficCars.find(
-        (c: TrafficCarAI) => c.vehicle.position.distanceTo(this.player.position) < 4.5 && c.hasDriver
+        (c: TrafficCarAI) => c.vehicle.position.distanceTo(this.player.position) < 3.6 && c.hasDriver
       );
       if (trafficCar) {
         store.setInteractionPrompt('Press [E] to Carjack Civilian Vehicle');
@@ -1611,7 +1689,7 @@ export class Game {
       let nearCar = false;
       const allVehicles = [...this.vehicles, ...this.trafficManager.vehicles];
       for (const veh of allVehicles) {
-        if (this.player.position.distanceTo(veh.position) < 4.2) {
+        if (this.player.position.distanceTo(veh.position) < 3.6) {
           nearCar = true;
           break;
         }
@@ -1621,12 +1699,21 @@ export class Game {
         return;
       }
     } else {
-      store.setInteractionPrompt('Press [E] Exit Vehicle · [R] Radio · [B] Seatbelt');
+      const brakePressed = this.keys['KeyS'] ||
+        this.keys['ArrowDown'] ||
+        this.keys['Space'] ||
+        this.touchInput.forward < 0 ||
+        this.touchInput.handbrake;
+      if (Math.abs(this.currentVehicle.speed) < 1.2 || brakePressed) {
+        store.setInteractionPrompt('Press [E] Exit Vehicle · [R] Radio · [B] Seatbelt');
+      } else {
+        store.setInteractionPrompt(null);
+      }
       return;
     }
 
     // Interior triggers already set interaction prompt via buildingInteriors.update
-    if (!store.interactionPrompt) {
+    if (store.currentInterior === 'outdoor') {
       store.setInteractionPrompt(null);
     }
   }
@@ -1665,3 +1752,5 @@ export class Game {
     this.renderer.dispose();
   }
 }
+
+export { CanvasWorld as Game };

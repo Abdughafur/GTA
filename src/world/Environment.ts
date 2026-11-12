@@ -8,6 +8,7 @@ export class EnvironmentSystem {
   public rainParticles: THREE.Points | null = null;
   private rainGeo: THREE.BufferGeometry | null = null;
   private scene: THREE.Scene;
+  private quality: 'low' | 'medium' | 'high' | 'ultra' = 'high';
   private skyMaterial: THREE.ShaderMaterial;
   private sky: THREE.Mesh;
   private stars: THREE.Points;
@@ -111,6 +112,22 @@ export class EnvironmentSystem {
 
     // 5. Rain Particle System
     this.initRain();
+    this.setPerformanceQuality(this.quality);
+  }
+
+  public setPerformanceQuality(quality: 'low' | 'medium' | 'high' | 'ultra') {
+    this.quality = quality;
+    const rainCount = quality === 'low' ? 900 : quality === 'medium' ? 1800 : 3500;
+    if (this.rainGeo && this.rainParticles) {
+      this.rainGeo.setDrawRange(0, rainCount);
+    }
+    if (this.rainParticles) {
+      const rainMaterial = this.rainParticles.material as THREE.PointsMaterial;
+      rainMaterial.opacity = quality === 'low' ? 0.45 : 0.75;
+    }
+    const starMaterial = this.stars.material as THREE.PointsMaterial;
+    starMaterial.size = quality === 'low' ? 1.2 : quality === 'medium' ? 1.8 : 2.2;
+    this.moon.scale.setScalar(quality === 'low' ? 0.8 : quality === 'medium' ? 0.9 : 1);
   }
 
   private initRain() {
@@ -184,7 +201,8 @@ export class EnvironmentSystem {
         this.rainParticles.position.set(centerPos.x, 0, centerPos.z);
         // Animate falling rain streaks
         const positions = this.rainGeo!.attributes.position.array as Float32Array;
-        for (let i = 1; i < positions.length; i += 3) {
+        const activeVertexCount = this.rainGeo!.drawRange.count;
+        for (let i = 1; i < activeVertexCount * 3; i += 3) {
           positions[i] -= dt * 65;
           if (positions[i] < 0) {
             positions[i] = 80;

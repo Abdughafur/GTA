@@ -13,6 +13,7 @@ export class CameraController {
   public pitch = 0.25; // Vertical (radians)
   public distance = 5.5;
   private vehicleLookYawOffset = 0;
+  private cameraRecoil = 0;
 
   private targetPos = new THREE.Vector3();
   private currentCameraPos = new THREE.Vector3();
@@ -30,11 +31,14 @@ export class CameraController {
     dt: number,
     isAirplane = false,
     airplanePitch = 0,
-    isTrain = false
+    isTrain = false,
+    vehicleCameraPosition: THREE.Vector3 | null = null
   ) {
     const store = useGameStore.getState();
     const viewMode: CameraViewMode = store.cameraViewMode;
     const isPhoneOpen = store.isPhoneOpen;
+    this.cameraRecoil *= Math.exp(-dt * 8);
+    const viewPitch = this.pitch - this.cameraRecoil;
 
     if (this.mode === 'cinematic') {
       // Cinematic slow sweep over Downtown & Bay
@@ -64,7 +68,9 @@ export class CameraController {
 
         const cockpitPos = isTrain
           ? playerPos.clone().add(new THREE.Vector3(0, 1.28, 0))
-          : isAirplane
+          : vehicleCameraPosition
+            ? vehicleCameraPosition.clone()
+            : isAirplane
           ? vehiclePos.clone()
             .add(new THREE.Vector3(0, 2.12, 0))
             .add(fwdDir.clone().multiplyScalar(6.7))
@@ -81,10 +87,14 @@ export class CameraController {
           : viewDir;
         const lookTarget = cockpitPos.clone()
           .add(lookDirection.multiplyScalar(isAirplane ? 80 : 20))
-          .add(new THREE.Vector3(0, isAirplane ? -this.pitch * 1.5 : -this.pitch * 3, 0));
+          .add(new THREE.Vector3(0, isAirplane ? -viewPitch * 1.5 : -viewPitch * 3, 0));
 
         this.camera.lookAt(lookTarget);
-        this.camera.fov = isAirplane ? 82 : 75;
+        this.camera.fov = isAirplane
+          ? 82
+          : store.isAiming && store.currentWeapon === 'sniper'
+            ? 34
+            : 75;
         this.camera.updateProjectionMatrix();
         return;
       }
@@ -128,13 +138,13 @@ export class CameraController {
         this.camera.position.copy(eyePos);
 
         const lookDir = new THREE.Vector3(
-          -Math.sin(this.yaw) * Math.cos(this.pitch),
-          -Math.sin(this.pitch),
-          -Math.cos(this.yaw) * Math.cos(this.pitch)
+          -Math.sin(this.yaw) * Math.cos(viewPitch),
+          -Math.sin(viewPitch),
+          -Math.cos(this.yaw) * Math.cos(viewPitch)
         );
 
         this.camera.lookAt(eyePos.clone().add(lookDir.multiplyScalar(20)));
-        this.camera.fov = 75;
+        this.camera.fov = store.isAiming && store.currentWeapon === 'sniper' ? 34 : 75;
         this.camera.updateProjectionMatrix();
         return;
       }
@@ -154,9 +164,9 @@ export class CameraController {
       this.pitch = Math.max(-0.4, Math.min(1.2, this.pitch));
 
       const camOffset = new THREE.Vector3(
-        Math.sin(this.yaw) * Math.cos(this.pitch) * camDist,
-        Math.sin(this.pitch) * camDist + 0.4,
-        Math.cos(this.yaw) * Math.cos(this.pitch) * camDist
+        Math.sin(this.yaw) * Math.cos(viewPitch) * camDist,
+        Math.sin(viewPitch) * camDist + 0.4,
+        Math.cos(this.yaw) * Math.cos(viewPitch) * camDist
       );
 
       const desiredCamPos = this.targetPos.clone().add(camOffset);
@@ -164,7 +174,9 @@ export class CameraController {
       this.camera.position.copy(this.currentCameraPos);
 
       // Aiming FOV zoom
-      const targetFov = store.isAiming ? 50 : 65;
+      const targetFov = store.isAiming
+        ? store.currentWeapon === 'sniper' ? 30 : 50
+        : 65;
       this.camera.fov += (targetFov - this.camera.fov) * Math.min(1.0, dt * 8);
       this.camera.updateProjectionMatrix();
 
@@ -189,5 +201,9 @@ export class CameraController {
 
   public handleZoom(delta: number) {
     this.distance = Math.max(2.5, Math.min(12.0, this.distance + delta * 0.005));
+  }
+
+  public applyRecoil(amount: number) {
+    this.cameraRecoil = Math.min(0.24, this.cameraRecoil + amount);
   }
 }

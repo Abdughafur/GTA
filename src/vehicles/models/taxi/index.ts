@@ -16,6 +16,19 @@ export function buildTaxi(color: number): VehicleMeshRig {
   addVehicleBody(ctx, { bottomY: 0.24, topY: 0.72 });
   addBox(ctx, ctx.body, [width * 0.94, 0.24, 1.05], [0, 0.69, 1.35], ctx.bodyMaterial);
   addCabin(ctx, { width: 1.7, height: 0.62, length: 2.35, y: 1.0, z: -0.12 });
+  const meter = new THREE.MeshStandardMaterial({
+    color: 0x0d1720,
+    roughness: 0.5,
+    metalness: 0.18
+  });
+  const meterDisplay = new THREE.MeshStandardMaterial({
+    color: 0x12313a,
+    emissive: 0x0c6070,
+    emissiveIntensity: 0.8,
+    roughness: 0.25
+  });
+  addBox(ctx, ctx.body, [0.19, 0.09, 0.12], [0.53, 0.88, 0.79], meter);
+  addBox(ctx, ctx.body, [0.15, 0.055, 0.018], [0.53, 0.9, 0.86], meterDisplay).castShadow = false;
 
   const checkerMaterial = new THREE.MeshStandardMaterial({ color: 0x202327, roughness: 0.75 });
   for (const side of [-1, 1]) {

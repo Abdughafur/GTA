@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { AIRPORT_CENTERS } from './CityGenerator';
 import { audioManager } from '../core/AudioManager';
 import { useGameStore } from '../core/gameState';
 import { PedestrianAI } from '../ai/PedestrianAI';
@@ -49,6 +50,7 @@ export class TransitSystem {
   private metroJourneyDestinationIndex = -1;
   private trainTrackPoints: THREE.Vector3[] = [];
   private trainTrackCurve!: THREE.CatmullRomCurve3;
+  private metroStationProgress: number[] = [];
   private metroStations: MetroStation[] = [];
   private metroTrains: MetroTrain[] = [];
   private stationLightMaterials: THREE.MeshStandardMaterial[] = [];
@@ -57,14 +59,14 @@ export class TransitSystem {
   private displayUpdateTimer = 0;
   private trainSoundTimer = 0;
   private readonly metroStationNames = [
-    'Harbor Point',
-    'Old Town',
-    'Market Square',
-    'Civic Center',
-    'University',
-    'East Gardens',
-    'Sunset Park',
-    'Airport Road'
+    'Downtown Central',
+    'Northgate',
+    'Northgate Connector',
+    'Eastport',
+    'Southport',
+    'Westhaven',
+    'Westhaven North',
+    'Downtown Market'
   ];
   private busGroup: THREE.Group = new THREE.Group();
   private busRouteCurve!: THREE.CatmullRomCurve3;
@@ -89,7 +91,7 @@ export class TransitSystem {
   // Airport & Flyable Airplane System
   public airportGroup: THREE.Group = new THREE.Group();
   public planeGroup: THREE.Group = new THREE.Group();
-  public planePos: THREE.Vector3 = new THREE.Vector3(-140, 0.05, -200);
+  public planePos: THREE.Vector3 = new THREE.Vector3(-70, 0.05, -3400);
   public planeVelocity: THREE.Vector3 = new THREE.Vector3();
   public planeSpeed = 0; // m/s (up to 70 m/s ~ 250 km/h)
   public planeHeading = Math.PI / 2; // Facing East down the runway
@@ -122,19 +124,46 @@ export class TransitSystem {
 
   // --- 1. TRAIN TRACKS & STATION ---
   private buildTrainTracksAndStation() {
-    // Keep the loop centered on perimeter roads instead of cutting through building blocks.
+    // Keep the regional metro aligned with street and countryside-road corridors.
     const loopPoints = [
       new THREE.Vector3(-340, 0.2, -340),
-      new THREE.Vector3(-40, 0.2, -340),
-      new THREE.Vector3(260, 0.2, -340),
-      new THREE.Vector3(260, 0.2, -40),
-      new THREE.Vector3(260, 0.2, 260),
-      new THREE.Vector3(-40, 0.2, 260),
-      new THREE.Vector3(-340, 0.2, 260),
-      new THREE.Vector3(-340, 0.2, -40)
+      new THREE.Vector3(60, 0.2, -340),
+      new THREE.Vector3(60, 0.2, -2140),
+      new THREE.Vector3(60, 0.2, -1940),
+      new THREE.Vector3(2060, 0.2, -1940),
+      new THREE.Vector3(2060, 0.2, 60),
+      new THREE.Vector3(2060, 0.2, 2060),
+      new THREE.Vector3(60, 0.2, 2060),
+      new THREE.Vector3(-1940, 0.2, 2060),
+      new THREE.Vector3(-1940, 0.2, 60),
+      new THREE.Vector3(-1940, 0.2, -1940),
+      new THREE.Vector3(-1940, 0.2, -340)
     ];
     this.trainTrackPoints = loopPoints;
     this.trainTrackCurve = new THREE.CatmullRomCurve3(loopPoints, true, 'catmullrom', 0.15);
+    const stationTargets = [
+      loopPoints[0],
+      loopPoints[2],
+      new THREE.Vector3(1060, 0.2, -1940),
+      loopPoints[5],
+      loopPoints[7],
+      loopPoints[9],
+      new THREE.Vector3(-1940, 0.2, -940),
+      new THREE.Vector3(-940, 0.2, -340)
+    ];
+    this.metroStationProgress = stationTargets.map((target) => {
+      let nearestProgress = 0;
+      let nearestDistance = Infinity;
+      for (let sample = 0; sample <= 1024; sample++) {
+        const progress = sample / 1024;
+        const distance = this.trainTrackCurve.getPointAt(progress).distanceToSquared(target);
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          nearestProgress = progress;
+        }
+      }
+      return nearestProgress;
+    });
 
     const railMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.9, roughness: 0.2 });
     const tieMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.82 });
@@ -179,7 +208,8 @@ export class TransitSystem {
     this.stationLightMaterials.push(lightMat);
 
     for (let index = 0; index < this.metroStationNames.length; index++) {
-      const progress = index / this.metroStationNames.length;
+      const progress = this.metroStationProgress[index];
+      if (progress === undefined) throw new Error(`Missing metro route position for ${this.metroStationNames[index]}.`);
       const position = this.trainTrackCurve.getPointAt(progress);
       const tangent = this.trainTrackCurve.getTangentAt(progress);
       const side = new THREE.Vector3(tangent.z, 0, -tangent.x);
@@ -835,6 +865,7 @@ export class TransitSystem {
   // --- 4. VICE BAY INTERNATIONAL AIRPORT (VBX) ---
   private buildAirport() {
     const ap = this.airportGroup;
+    ap.position.set(AIRPORT_CENTERS[0].x + 70, 0, AIRPORT_CENTERS[0].z + 200);
 
     const runwayMat = new THREE.MeshStandardMaterial({ color: 0x222a31, roughness: 0.82 });
     const markMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
@@ -1128,6 +1159,31 @@ export class TransitSystem {
     const display = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.16, 0.025), instrumentMat);
     display.position.set(0, 2.28, 7.28);
     cockpitInterior.add(cockpitFloor, dashboard, display);
+    for (const x of [-0.62, 0.04, 0.4]) {
+      const instrument = new THREE.Mesh(
+        new THREE.BoxGeometry(x === 0.4 ? 0.22 : 0.34, 0.12, 0.025),
+        instrumentMat
+      );
+      instrument.position.set(x, 2.14, 7.22);
+      cockpitInterior.add(instrument);
+    }
+    const controlColumn = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.035, 0.05, 0.52, 8),
+      chromeMat
+    );
+    controlColumn.position.set(-0.32, 1.87, 6.95);
+    const controlYoke = new THREE.Group();
+    const yokeRing = new THREE.Mesh(new THREE.TorusGeometry(0.19, 0.024, 8, 20), chromeMat);
+    const yokeBar = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.035, 0.045), chromeMat);
+    yokeBar.position.y = -0.02;
+    controlYoke.add(yokeRing, yokeBar);
+    controlYoke.position.set(-0.32, 2.08, 6.91);
+    const throttleLever = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.025, 0.03, 0.26, 8),
+      chromeMat
+    );
+    throttleLever.position.set(0.18, 1.78, 6.88);
+    cockpitInterior.add(controlColumn, controlYoke, throttleLever);
     for (const x of [-0.32, 0.32]) {
       const seatBase = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.16, 0.55), cockpitDark);
       seatBase.position.set(x, 1.6, 6.45);
@@ -1291,6 +1347,14 @@ export class TransitSystem {
         ? `Autopilot engaged · ${Math.round(this.planeAutopilotSpeed * 1.94)} knots · press G to change cruise speed`
         : 'Autopilot disengaged · manual flight controls active'
     );
+  }
+
+  public getPlaneCockpitCameraPosition() {
+    return this.planeGroup.localToWorld(new THREE.Vector3(-0.32, 2.4, 6.55));
+  }
+
+  public getPlaneEntryPosition() {
+    return this.planeGroup.localToWorld(new THREE.Vector3(-1.65, 0.15, 6.6));
   }
 
   public cyclePlaneAutopilotSpeed() {
@@ -1529,6 +1593,15 @@ export class TransitSystem {
         this.planeVelocity.y = 0;
         this.planePitch = THREE.MathUtils.lerp(this.planePitch, 0, dt * 8);
         this.planeRoll = THREE.MathUtils.lerp(this.planeRoll, 0, dt * 8);
+      }
+
+      this.planeSpeed = THREE.MathUtils.clamp(this.planeSpeed, 0, 72);
+      this.planeVelocity.x = THREE.MathUtils.clamp(this.planeVelocity.x, -90, 90);
+      this.planeVelocity.y = THREE.MathUtils.clamp(this.planeVelocity.y, -30, 30);
+      this.planeVelocity.z = THREE.MathUtils.clamp(this.planeVelocity.z, -90, 90);
+      if (!Number.isFinite(this.planeSpeed) || !this.planeVelocity.lengthSq()) {
+        this.planeSpeed = 0;
+        this.planeVelocity.set(0, 0, 0);
       }
 
       this.planeGroup.position.copy(this.planePos);

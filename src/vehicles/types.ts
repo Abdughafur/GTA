@@ -52,6 +52,12 @@ export interface VehicleAnimationInput {
 export interface VehicleMeshRig {
   group: THREE.Group;
   body: THREE.Group;
+  bodyMaterial: THREE.MeshStandardMaterial;
+  interiorCameraPosition: THREE.Vector3;
+  damageParts: {
+    mirrors: THREE.Object3D[];
+    windows: THREE.Mesh[];
+  };
   wheels: THREE.Group[];
   frontLeftWheel: THREE.Group;
   frontRightWheel: THREE.Group;
@@ -61,6 +67,8 @@ export interface VehicleMeshRig {
   rightDoorPivot?: THREE.Group;
   sirenMeshes?: { red: THREE.Mesh; blue: THREE.Mesh };
   steeringWheel?: THREE.Group;
+  speedNeedle?: THREE.Mesh;
+  rpmNeedle?: THREE.Mesh;
   features: readonly string[];
   animate?: (dt: number, speed: number, input: VehicleAnimationInput) => void;
 }

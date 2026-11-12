@@ -161,7 +161,7 @@ export const Smartphone: React.FC<SmartphoneProps> = ({ onAcceptMission, onSpawn
 
   return (
     <div className="ios-phone-anchor">
-      <div className="ios-device" role="dialog" aria-label="BlockGTA smartphone">
+      <div className="ios-device" role="dialog" aria-label="CanvasWorld smartphone">
         <div className="ios-screen">
           <div className="ios-statusbar">
             <span className="ios-status-time">{formattedTime}</span>

@@ -40,7 +40,7 @@ export const SUPERMARKET_PRODUCTS: {
   { id: 'soda', name: 'Bay Cola', description: 'Chilled soft drink', price: 3, hunger: 2, thirst: 14, health: 0, color: 0x7f1d1d },
   { id: 'sandwich', name: 'Deli sandwich', description: 'Made fresh at the counter', price: 8, hunger: 30, thirst: 0, health: 4, color: 0x84a34d }
 ];
-export type WeaponType = 'fists' | 'knife' | 'pistol' | 'smg' | 'rifle';
+export type WeaponType = 'fists' | 'knife' | 'pistol' | 'smg' | 'rifle' | 'sniper';
 export type CameraViewMode = 'third_chase' | 'third_close' | 'first_person';
 
 export interface WeaponData {
@@ -57,7 +57,8 @@ export interface WeaponData {
 export const AMMO_PACKS = {
   pistol: { quantity: 45, price: 180 },
   smg: { quantity: 90, price: 320 },
-  rifle: { quantity: 90, price: 420 }
+  rifle: { quantity: 90, price: 420 },
+  sniper: { quantity: 10, price: 700 }
 } as const;
 
 export interface MissionData {
@@ -354,7 +355,7 @@ const flushPendingSave = () => {
     pendingSave = null;
     saveTimer = null;
   } catch (error) {
-    console.error('Unable to save BlockGTA progress to local storage.', error);
+    console.error('Unable to save CanvasWorld progress to local storage.', error);
   }
 };
 
@@ -1007,7 +1008,13 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
   isMuted: false,
   soundVolume: 0.8,
   musicVolume: 0.6,
-  graphicsQuality: 'high',
+  graphicsQuality: (() => {
+    if (typeof navigator === 'undefined') return 'medium' as const;
+    const hasLowHardware = typeof navigator.hardwareConcurrency === 'number' && navigator.hardwareConcurrency <= 4;
+    const hasLowMemory = typeof (navigator as Navigator & { deviceMemory?: number }).deviceMemory === 'number' &&
+      (navigator as Navigator & { deviceMemory?: number }).deviceMemory! <= 6;
+    return hasLowHardware || hasLowMemory ? 'medium' as const : 'high' as const;
+  })(),
   touchMode: typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches,
   setMuted: (isMuted) => set({ isMuted }),
   setSoundVolume: (soundVolume) => set({ soundVolume }),
@@ -1083,6 +1090,16 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
       maxClip: 30,
       reserve: 120,
       iconName: 'shield'
+    },
+    sniper: {
+      name: 'Precision Sniper Rifle',
+      type: 'sniper',
+      damage: 100,
+      fireRate: 0.8,
+      clip: 5,
+      maxClip: 5,
+      reserve: 25,
+      iconName: 'target'
     }
   },
   isAiming: false,

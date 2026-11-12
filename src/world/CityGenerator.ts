@@ -4,10 +4,53 @@ import { modelFactory } from './ModelFactory';
 
 export const CITY_ROAD_COORDS = [-340, -240, -140, -40, 60, 160, 260] as const;
 export const WORLD_RADIUS = 50000;
+export const CITY_CENTERS = [
+  { name: 'Vice Bay', x: 0, z: 0, radius: 1050 },
+  { name: 'Northgate', x: 10, z: -2190, radius: 900 },
+  { name: 'Eastport', x: 2210, z: 10, radius: 900 },
+  { name: 'Southport', x: 10, z: 2210, radius: 900 },
+  { name: 'Westhaven', x: -2190, z: 10, radius: 900 }
+] as const;
+export const AIRPORT_CENTERS = [
+  { name: 'Northgate International', x: 0, z: -3400 },
+  { name: 'Eastport Regional', x: 3400, z: 0 }
+] as const;
+
+const AIRPORT_CLEAR_RADIUS = 390;
+
+export function isAirportArea(x: number, z: number): boolean {
+  return AIRPORT_CENTERS.some(
+    (airport) => Math.hypot(x - airport.x, z - airport.z) <= AIRPORT_CLEAR_RADIUS
+  );
+}
+
+export function overlapsAirportArea(originX: number, originZ: number, size: number): boolean {
+  return AIRPORT_CENTERS.some((airport) => {
+    const nearestX = THREE.MathUtils.clamp(airport.x, originX, originX + size);
+    const nearestZ = THREE.MathUtils.clamp(airport.z, originZ, originZ + size);
+    return Math.hypot(airport.x - nearestX, airport.z - nearestZ) <= AIRPORT_CLEAR_RADIUS;
+  });
+}
+
+export function isUrbanArea(x: number, z: number): boolean {
+  return CITY_CENTERS.some(
+    (city) => Math.hypot(x - city.x, z - city.z) <= city.radius
+  );
+}
+
+export function isLandmarkArea(x: number, z: number): boolean {
+  return CITY_CENTERS.slice(1).some(
+    (city) => Math.hypot(x - city.x, z - city.z) <= 45
+  );
+}
 
 function smoothstep(edge0: number, edge1: number, value: number): number {
   const t = THREE.MathUtils.clamp((value - edge0) / (edge1 - edge0), 0, 1);
   return t * t * (3 - 2 * t);
+}
+
+function getHarborBridgeHeight(z: number): number {
+  return 12 * smoothstep(340, 380, z) * (1 - smoothstep(520, 560, z));
 }
 
 function terrainNoise(x: number, z: number, scale: number): number {
@@ -29,7 +72,20 @@ function terrainNoise(x: number, z: number, scale: number): number {
 }
 
 export function getTerrainHeight(x: number, z: number): number {
-  const distanceFromCity = Math.hypot(x, z);
+  if (isAirportArea(x, z)) return 0;
+  const onHarborBridge = (x >= 148 && x <= 172) || (x >= -152 && x <= -128);
+  if (onHarborBridge && z >= 340 && z <= 560) {
+    return getHarborBridgeHeight(z);
+  }
+
+  return getBaseTerrainHeight(x, z);
+}
+
+function getBaseTerrainHeight(x: number, z: number): number {
+  let distanceFromCity = Infinity;
+  for (const city of CITY_CENTERS) {
+    distanceFromCity = Math.min(distanceFromCity, Math.hypot(x - city.x, z - city.z));
+  }
   const blend = smoothstep(3200, 6200, distanceFromCity);
   if (blend === 0) return 0;
 
@@ -75,11 +131,21 @@ export function isWaterArea(x: number, z: number): boolean {
 }
 
 export function isInSwimmableWater(x: number, z: number): boolean {
-  const onBridge = x >= 148 && x <= 172 && z >= 340 && z <= 560;
+  const onBridge = ((x >= 148 && x <= 172) || (x >= -152 && x <= -128)) &&
+    z >= 340 &&
+    z <= 560;
   return isWaterArea(x, z) && !onBridge;
 }
 
 export function getDistrictName(x: number, z: number): string {
+  if (isAirportArea(x, z)) {
+    return z < -2000 ? 'Northgate International Airport' : 'Eastport Regional Airport';
+  }
+  for (const city of CITY_CENTERS.slice(1)) {
+    const distance = Math.hypot(x - city.x, z - city.z);
+    if (distance < 320) return `${city.name} Downtown`;
+    if (distance <= city.radius) return `${city.name} Metropolitan`;
+  }
   if (Math.max(Math.abs(x), Math.abs(z)) > 3000) {
     const villageX = Math.round(x / 7000) * 7000;
     const villageZ = Math.round(z / 7000) * 7000;
@@ -153,12 +219,12 @@ export class CityGenerator {
     const trafficSignals: TrafficSignalData[] = [];
 
     // City Ground Plane (Asphalt / Sidewalk / Grass)
-    const groundGeo = new THREE.PlaneGeometry(WORLD_RADIUS * 2, WORLD_RADIUS * 2, 512, 512);
+    const groundGeo = new THREE.PlaneGeometry(WORLD_RADIUS * 2, WORLD_RADIUS * 2, 256, 256);
     const groundPositions = groundGeo.attributes.position as THREE.BufferAttribute;
     for (let i = 0; i < groundPositions.count; i++) {
       const worldX = groundPositions.getX(i);
       const worldZ = -groundPositions.getY(i);
-      groundPositions.setZ(i, getTerrainHeight(worldX, worldZ));
+      groundPositions.setZ(i, getBaseTerrainHeight(worldX, worldZ));
     }
     groundPositions.needsUpdate = true;
     groundGeo.computeVertexNormals();
@@ -236,10 +302,12 @@ export class CityGenerator {
     ).array.slice() as Float32Array;
 
     colliders.push(
-      { minX: -550, maxX: 148, minZ: 360, maxZ: 540, type: 'water' },
+      { minX: -550, maxX: -152, minZ: 360, maxZ: 540, type: 'water' },
+      { minX: -128, maxX: 148, minZ: 360, maxZ: 540, type: 'water' },
       { minX: 172, maxX: 550, minZ: 360, maxZ: 540, type: 'water' }
     );
-    this.addHarborBridge(cityGroup);
+    this.addHarborBridge(cityGroup, 160);
+    this.addHarborBridge(cityGroup, -140);
 
     // --- ROAD NETWORK GRID ---
     // Major Avenue X: Z = -140, Z = -40, Z = 60, Z = 160
@@ -274,16 +342,26 @@ export class CityGenerator {
 
     // Vertical roads
     roadXCoords.forEach((x) => {
-      const roadGeo = new THREE.PlaneGeometry(roadWidth, 800);
+      const bridgeRoad = x === 160 || x === -140;
+      const roadGeo = bridgeRoad
+        ? new THREE.PlaneGeometry(roadWidth, 800, 1, 80)
+        : new THREE.PlaneGeometry(roadWidth, 660);
+      if (bridgeRoad) {
+        roadGeo.rotateX(-Math.PI / 2);
+        const roadPositions = roadGeo.attributes.position as THREE.BufferAttribute;
+        for (let index = 0; index < roadPositions.count; index++) {
+          roadPositions.setY(index, getHarborBridgeHeight(roadPositions.getZ(index)));
+        }
+        roadGeo.computeVertexNormals();
+      }
       const roadMesh = new THREE.Mesh(roadGeo, roadMat);
-      roadMesh.rotation.x = -Math.PI / 2;
-      roadMesh.rotation.z = Math.PI / 2;
-      roadMesh.position.set(x, 0.035, 0);
+      if (!bridgeRoad) roadMesh.rotation.x = -Math.PI / 2;
+      roadMesh.position.set(x, 0.035, bridgeRoad ? 0 : -70);
       roadMesh.receiveShadow = true;
       cityGroup.add(roadMesh);
 
-      for (let z = -400; z <= 400; z += 30) {
-        roadNodes.push(new THREE.Vector3(x, 0, z));
+      for (let z = -400; z <= (bridgeRoad ? 400 : 260); z += 30) {
+        roadNodes.push(new THREE.Vector3(x, getTerrainHeight(x, z), z));
       }
     });
 
@@ -297,8 +375,12 @@ export class CityGenerator {
       const z1 = z + (horizontal ? -halfWidth : -halfLength);
       const z2 = z + (horizontal ? halfWidth : halfLength);
       laneDashVertices.push(
-        x1, 0.052, z1, x1, 0.052, z2, x2, 0.052, z2,
-        x1, 0.052, z1, x2, 0.052, z2, x2, 0.052, z1
+        x1, getTerrainHeight(x1, z1) + 0.052, z1,
+        x1, getTerrainHeight(x1, z2) + 0.052, z2,
+        x2, getTerrainHeight(x2, z2) + 0.052, z2,
+        x1, getTerrainHeight(x1, z1) + 0.052, z1,
+        x2, getTerrainHeight(x2, z2) + 0.052, z2,
+        x2, getTerrainHeight(x2, z1) + 0.052, z1
       );
     };
     for (const z of roadZCoords) {
@@ -376,10 +458,10 @@ export class CityGenerator {
 
     // --- DISTRICT 1: DOWNTOWN FINANCIAL SKYSCRAPERS (X: -50 to 30, Z: -130 to -50) ---
     const downtownBlocks = [
-      { x: -10, z: -90, w: 46, d: 52, h: 110, style: 0, name: 'Maze Bank Tower' },
-      { x: -38, z: -90, w: 28, d: 42, h: 75, style: 1, name: 'V-Bay Trade Center' },
-      { x: 18, z: -90, w: 32, d: 48, h: 85, style: 2, name: 'Apex Financial' },
-      { x: -110, z: -90, w: 50, d: 50, h: 65, style: 3, name: 'Centrum Tower' },
+      { x: -90, z: -90, w: 46, d: 52, h: 110, style: 0, name: 'Maze Bank Tower' },
+      { x: -190, z: -90, w: 28, d: 42, h: 75, style: 1, name: 'V-Bay Trade Center' },
+      { x: -90, z: -190, w: 32, d: 48, h: 85, style: 2, name: 'Apex Financial' },
+      { x: -190, z: -190, w: 50, d: 50, h: 65, style: 3, name: 'Centrum Tower' },
       { x: -110, z: 10, w: 52, d: 54, h: 58, style: 1, name: 'Metropolitan Life' }
     ];
 
@@ -402,7 +484,7 @@ export class CityGenerator {
     // --- DISTRICT 2: COMMERCIAL & DEALERSHIP (X: 50 to 130, Z: -130 to -50) ---
     // Legendary Motorsport Dealership
     const dealerGroup = new THREE.Group();
-    dealerGroup.position.set(90, 0, -90);
+    dealerGroup.position.set(110, 0, -90);
 
     const dealerBase = new THREE.Mesh(
       new THREE.BoxGeometry(45, 10, 40),
@@ -433,8 +515,8 @@ export class CityGenerator {
 
     cityGroup.add(dealerGroup);
     colliders.push({
-      minX: 90 - 23,
-      maxX: 90 + 23,
+      minX: 110 - 23,
+      maxX: 110 + 23,
       minZ: -90 - 21,
       maxZ: -90 + 21,
       name: 'Legendary Motorsport Dealership',
@@ -443,7 +525,7 @@ export class CityGenerator {
 
     // Pay 'n' Spray Garage (X: 90, Z: 10)
     const garageGroup = new THREE.Group();
-    garageGroup.position.set(90, 0, 10);
+    garageGroup.position.set(110, 0, 10);
     const garageBuilding = new THREE.Mesh(
       new THREE.BoxGeometry(36, 12, 34),
       new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.7 })
@@ -474,8 +556,8 @@ export class CityGenerator {
 
     cityGroup.add(garageGroup);
     colliders.push({
-      minX: 90 - 18,
-      maxX: 90 + 18,
+      minX: 110 - 18,
+      maxX: 110 + 18,
       minZ: 10 - 17,
       maxZ: 10 + 17,
       name: "Pay 'n' Spray Garage",
@@ -518,7 +600,9 @@ export class CityGenerator {
     const containerColors = [0xef4444, 0x3b82f6, 0x10b981, 0xf59e0b, 0x6366f1];
     for (let i = 0; i < 18; i++) {
       const cx = -110 + (i % 4) * 16 + (Math.random() * 4 - 2);
-      const cz = 100 + Math.floor(i / 4) * 22;
+      const cz = i < 8
+        ? 90 + Math.floor(i / 4) * 22
+        : 188 + Math.floor((i - 8) / 5) * 20;
       const ch = Math.random() > 0.4 ? 2 : 1; // stacked 1 or 2 high
       const color = containerColors[i % containerColors.length];
 
@@ -542,8 +626,8 @@ export class CityGenerator {
 
     // --- DISTRICT 4: MARINA & LUXURY HOTEL RESIDENCES (X: 50 to 140, Z: 90 to 210) ---
     const luxuryHotels = [
-      { x: 90, z: 110, w: 42, d: 38, h: 48, style: 2, name: 'Oceanview Suites' },
-      { x: 90, z: 180, w: 48, d: 42, h: 56, style: 3, name: 'The Vice Marina Club' }
+      { x: 110, z: 110, w: 42, d: 38, h: 48, style: 2, name: 'Oceanview Suites' },
+      { x: 110, z: 220, w: 48, d: 42, h: 56, style: 3, name: 'The Vice Marina Club' }
     ];
     luxuryHotels.forEach((h) => {
       const bldg = this.createSkyscraper(h.w, h.h, h.d, h.style, h.name);
@@ -566,13 +650,15 @@ export class CityGenerator {
     this.addFarm(cityGroup, colliders);
     this.addDistantHills(cityGroup, colliders);
     this.addLandmarkSigns(cityGroup);
+    this.addSatelliteLandmarks(cityGroup, colliders);
 
     // Outlying boundaries / city fence to prevent falling off the expanded map.
+    const worldEdge = WORLD_RADIUS - 10;
     colliders.push(
-      { minX: -1510, maxX: -1490, minZ: -1510, maxZ: 1510, type: 'building' },
-      { minX: 1490, maxX: 1510, minZ: -1510, maxZ: 1510, type: 'building' },
-      { minX: -1510, maxX: 1510, minZ: -1510, maxZ: -1490, type: 'building' },
-      { minX: -1510, maxX: 1510, minZ: 1490, maxZ: 1510, type: 'building' }
+      { minX: -WORLD_RADIUS, maxX: -worldEdge, minZ: -WORLD_RADIUS, maxZ: WORLD_RADIUS, type: 'building' },
+      { minX: worldEdge, maxX: WORLD_RADIUS, minZ: -WORLD_RADIUS, maxZ: WORLD_RADIUS, type: 'building' },
+      { minX: -WORLD_RADIUS, maxX: WORLD_RADIUS, minZ: -WORLD_RADIUS, maxZ: -worldEdge, type: 'building' },
+      { minX: -WORLD_RADIUS, maxX: WORLD_RADIUS, minZ: worldEdge, maxZ: WORLD_RADIUS, type: 'building' }
     );
 
     return {
@@ -583,8 +669,8 @@ export class CityGenerator {
       spawnPoints: {
         player: new THREE.Vector3(-10, 0, 25),
         safehouse: new THREE.Vector3(-10, 0, 25),
-        dealership: new THREE.Vector3(90, 0, -65),
-        garage: new THREE.Vector3(90, 0, 32),
+        dealership: new THREE.Vector3(110, 0, -65),
+        garage: new THREE.Vector3(110, 0, 32),
         downtownRace: new THREE.Vector3(-10, 0, -140),
         docks: new THREE.Vector3(-110, 0, 160)
       },
@@ -594,10 +680,10 @@ export class CityGenerator {
         oceanGeometry: oceanGeo,
         oceanBaseHeights
       },
-      farmBounds: { minX: 262, maxX: 388, minZ: 75, maxZ: 163 },
+      farmBounds: { minX: 275, maxX: 388, minZ: 76, maxZ: 138 },
       interactiveZones: {
-        garage: new THREE.Vector3(90, 0, 28),
-        dealership: new THREE.Vector3(90, 0, -68),
+        garage: new THREE.Vector3(110, 0, 28),
+        dealership: new THREE.Vector3(110, 0, -68),
         fastFood: new THREE.Vector3(-10, 0, 125)
       }
     };
@@ -611,6 +697,33 @@ export class CityGenerator {
     return objects;
   }
 
+  private addSatelliteLandmarks(cityGroup: THREE.Group, colliders: CollisionBox[]) {
+    const landmarks = [
+      { name: 'Northgate Beacon Tower', style: 0 },
+      { name: 'Eastport Exchange', style: 2 },
+      { name: 'Southport Sky Gardens', style: 3 },
+      { name: 'Westhaven Grand Tower', style: 1 }
+    ];
+
+    CITY_CENTERS.slice(1).forEach((city, index) => {
+      const landmark = landmarks[index];
+      if (!landmark) throw new Error(`Missing landmark definition for ${city.name}.`);
+      const width = 54;
+      const depth = 50;
+      const building = this.createSkyscraper(width, 92 + index * 6, depth, landmark.style, landmark.name);
+      building.position.set(city.x, getTerrainHeight(city.x, city.z), city.z);
+      cityGroup.add(building);
+      colliders.push({
+        minX: city.x - width / 2 - 2,
+        maxX: city.x + width / 2 + 2,
+        minZ: city.z - depth / 2 - 2,
+        maxZ: city.z + depth / 2 + 2,
+        name: landmark.name,
+        type: 'building'
+      });
+    });
+  }
+
   private addLandmarkSigns(cityGroup: THREE.Group) {
     const landmarks = [
       { name: 'WELCOME TO VICE BAY', x: -18, z: -254, color: '#087e8b' },
@@ -622,7 +735,7 @@ export class CityGenerator {
       { name: 'OCEANVIEW · MARINA CLUB', x: 142, z: 142, color: '#287f88' },
       { name: 'SUNSET BEACH', x: 45, z: 250, color: '#d36e49' },
       { name: 'PIER 9 · PUBLIC WALK', x: -160, z: 265, color: '#76533b' },
-      { name: 'VICE BAY INTERNATIONAL', x: 280, z: -192, color: '#18788d' },
+      { name: 'EASTPORT REGIONAL AIRPORT', x: 3340, z: 45, color: '#18788d' },
       { name: 'CARTER COUNTY · FARM GATE', x: 298, z: 82, color: '#6f763b' },
       { name: 'V-BAY TRADE CENTER', x: -130, z: -160, color: '#565276' },
       { name: 'NORTH BAY · RESIDENTIAL', x: 24, z: -254, color: '#687a65' },
@@ -666,7 +779,7 @@ export class CityGenerator {
 
   private addSupermarketExterior(cityGroup: THREE.Group, colliders: CollisionBox[]) {
     const shop = new THREE.Group();
-    shop.position.set(180, 0, -320);
+    shop.position.set(210, 0, -290);
 
     const facade = new THREE.MeshStandardMaterial({ color: 0xe7e4d8, roughness: 0.76 });
     const trim = new THREE.MeshStandardMaterial({ color: 0x126b52, roughness: 0.5 });
@@ -713,10 +826,10 @@ export class CityGenerator {
     cityGroup.add(shop);
 
     colliders.push({
-      minX: 165.5,
-      maxX: 194.5,
-      minZ: -334.5,
-      maxZ: -305.5,
+      minX: 195.5,
+      maxX: 224.5,
+      minZ: -304.5,
+      maxZ: -275.5,
       name: 'Vice Bay Fresh Market',
       type: 'building'
     });
@@ -736,6 +849,24 @@ export class CityGenerator {
         const seed = Math.abs((x * 17 + z * 31) % 997);
         const width = 25 + (seed % 10);
         const depth = 26 + ((seed * 3) % 12);
+        const minX = x - width / 2 - 2;
+        const maxX = x + width / 2 + 2;
+        const minZ = z - depth / 2 - 2;
+        const maxZ = z + depth / 2 + 2;
+        const touchesStreet = CITY_ROAD_COORDS.some(
+          (coordinate) =>
+            Math.abs(x - coordinate) < width / 2 + 12 ||
+            Math.abs(z - coordinate) < depth / 2 + 12
+        );
+        const overlapsExisting = colliders.some(
+          (collider) =>
+            minX < collider.maxX &&
+            maxX > collider.minX &&
+            minZ < collider.maxZ &&
+            maxZ > collider.minZ
+        );
+        if (touchesStreet || overlapsExisting) continue;
+
         const height = 17 + ((seed * 7) % 38);
         const color = facadeColors[seed % facadeColors.length];
         const building = new THREE.Group();
@@ -810,10 +941,10 @@ export class CityGenerator {
         building.position.set(x, 0, z);
         cityGroup.add(building);
         colliders.push({
-          minX: x - width / 2 - 1,
-          maxX: x + width / 2 + 1,
-          minZ: z - depth / 2 - 1,
-          maxZ: z + depth / 2 + 1,
+          minX,
+          maxX,
+          minZ,
+          maxZ,
           type: 'building'
         });
       }
@@ -1035,17 +1166,18 @@ export class CityGenerator {
     sign.position.set(325, 16, -148.7);
     airport.add(sign);
 
+    airport.position.set(AIRPORT_CENTERS[1].x - 325, 0, AIRPORT_CENTERS[1].z + 300);
     cityGroup.add(airport);
   }
 
   private addBeachfront(cityGroup: THREE.Group) {
-    const promenade = new THREE.Mesh(
-      new THREE.PlaneGeometry(760, 9),
-      new THREE.MeshStandardMaterial({ color: 0xd9d3c3, roughness: 0.86 })
-    );
-    promenade.rotation.x = -Math.PI / 2;
-    promenade.position.set(-10, 0.015, 268);
-    cityGroup.add(promenade);
+    const promenadeMaterial = new THREE.MeshStandardMaterial({ color: 0xd9d3c3, roughness: 0.86 });
+    for (const [centerX, width] of [[-120, 540], [270, 200]] as const) {
+      const promenade = new THREE.Mesh(new THREE.PlaneGeometry(width, 9), promenadeMaterial);
+      promenade.rotation.x = -Math.PI / 2;
+      promenade.position.set(centerX, 0.015, 280);
+      cityGroup.add(promenade);
+    }
 
     const sandMat = new THREE.MeshStandardMaterial({ color: 0xf2dfa9, roughness: 0.94 });
     const woodMat = new THREE.MeshStandardMaterial({ color: 0x9d6940, roughness: 0.86 });
@@ -1111,7 +1243,7 @@ export class CityGenerator {
     const field = new THREE.Group();
     const stemMaterial = new THREE.MeshStandardMaterial({ color: 0x738b35, roughness: 0.9 });
     const leafMaterial = new THREE.MeshStandardMaterial({ color: 0x9ca34a, roughness: 0.85 });
-    const plantCount = 8 * 18;
+    const plantCount = 8 * 15;
     const stemMesh = new THREE.InstancedMesh(
       new THREE.BoxGeometry(0.08, 0.55, 0.08),
       stemMaterial,
@@ -1125,9 +1257,9 @@ export class CityGenerator {
     const transform = new THREE.Object3D();
     let plant = 0;
     for (let row = 0; row < 8; row++) {
-      for (let index = 0; index < 18; index++) {
+      for (let index = 0; index < 15; index++) {
         const x = 278 + row * 4.1;
-        const z = 78 + index * 4.4;
+        const z = 78 + index * 4.1;
         const height = 0.75 + Math.sin((row + index) * 0.71) * 0.12;
         transform.position.set(x, height / 2, z);
         transform.rotation.set(0, Math.sin(index * 2.3) * 0.16, 0);
@@ -1172,9 +1304,9 @@ export class CityGenerator {
     );
     loftWindow.position.set(0, 6.2, 8.1);
     barn.add(barnBody, roofA, roofB, barnDoor, loftWindow);
-    barn.position.set(363, 0, 125);
+    barn.position.set(332, 0, 110);
     cityGroup.add(barn);
-    colliders.push({ minX: 353, maxX: 373, minZ: 115, maxZ: 135, type: 'building' });
+    colliders.push({ minX: 322, maxX: 350, minZ: 101, maxZ: 119, type: 'building' });
 
     const silo = new THREE.Group();
     const siloBody = new THREE.Mesh(
@@ -1195,41 +1327,41 @@ export class CityGenerator {
     const fenceMaterial = new THREE.MeshStandardMaterial({ color: 0x795b3b, roughness: 0.9 });
     const fence = new THREE.Group();
     const postGeometry = new THREE.BoxGeometry(0.18, 1.2, 0.18);
-    for (const x of [260, 390]) {
-      for (let z = 70; z <= 168; z += 8) {
+    for (const x of [275, 390]) {
+      for (let z = 74; z <= 140; z += 8) {
         const post = new THREE.Mesh(postGeometry, fenceMaterial);
         post.position.set(x, 0.6, z);
         fence.add(post);
       }
     }
-    for (const z of [70, 168]) {
-      for (let x = 260; x <= 390; x += 8) {
-        if (z === 70 && x >= 308 && x <= 316) continue;
+    for (const z of [74, 140]) {
+      for (let x = 275; x <= 390; x += 8) {
+        if (z === 74 && x >= 308 && x <= 316) continue;
         const post = new THREE.Mesh(postGeometry, fenceMaterial);
         post.position.set(x, 0.6, z);
         fence.add(post);
       }
     }
     for (const y of [0.45, 0.9]) {
-      const railNorthWest = new THREE.Mesh(new THREE.BoxGeometry(45, 0.1, 0.12), fenceMaterial);
-      railNorthWest.position.set(282.5, y, 70);
+      const railNorthWest = new THREE.Mesh(new THREE.BoxGeometry(30, 0.1, 0.12), fenceMaterial);
+      railNorthWest.position.set(290, y, 74);
       const railNorthEast = new THREE.Mesh(new THREE.BoxGeometry(75, 0.1, 0.12), fenceMaterial);
-      railNorthEast.position.set(352.5, y, 70);
+      railNorthEast.position.set(352.5, y, 74);
       const railSouth = new THREE.Mesh(new THREE.BoxGeometry(130, 0.1, 0.12), fenceMaterial);
-      railSouth.position.set(325, y, 168);
-      const railWest = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.1, 98), fenceMaterial);
-      railWest.position.set(260, y, 119);
+      railSouth.position.set(325, y, 140);
+      const railWest = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.1, 66), fenceMaterial);
+      railWest.position.set(275, y, 107);
       const railEast = railWest.clone();
-      railEast.position.x = 390;
+      railEast.position.set(390, y, 107);
       fence.add(railNorthWest, railNorthEast, railSouth, railWest, railEast);
     }
     cityGroup.add(fence);
     colliders.push(
-      { minX: 259.8, maxX: 260.2, minZ: 70, maxZ: 168, type: 'building' },
-      { minX: 389.8, maxX: 390.2, minZ: 70, maxZ: 168, type: 'building' },
-      { minX: 260, maxX: 305, minZ: 69.8, maxZ: 70.2, type: 'building' },
-      { minX: 315, maxX: 390, minZ: 69.8, maxZ: 70.2, type: 'building' },
-      { minX: 260, maxX: 390, minZ: 167.8, maxZ: 168.2, type: 'building' }
+      { minX: 274.8, maxX: 275.2, minZ: 74, maxZ: 140, type: 'building' },
+      { minX: 389.8, maxX: 390.2, minZ: 74, maxZ: 140, type: 'building' },
+      { minX: 275, maxX: 305, minZ: 73.8, maxZ: 74.2, type: 'building' },
+      { minX: 315, maxX: 390, minZ: 73.8, maxZ: 74.2, type: 'building' },
+      { minX: 275, maxX: 390, minZ: 139.8, maxZ: 140.2, type: 'building' }
     );
   }
 
@@ -1271,10 +1403,17 @@ export class CityGenerator {
     );
   }
 
-  private addHarborBridge(cityGroup: THREE.Group) {
+  private addHarborBridge(cityGroup: THREE.Group, centerX: number) {
     const bridge = new THREE.Group();
+    const deckGeometry = new THREE.PlaneGeometry(20, 220, 1, 44);
+    deckGeometry.rotateX(-Math.PI / 2);
+    const deckPositions = deckGeometry.attributes.position as THREE.BufferAttribute;
+    for (let index = 0; index < deckPositions.count; index++) {
+      deckPositions.setY(index, getHarborBridgeHeight(450 + deckPositions.getZ(index)) + 0.06);
+    }
+    deckGeometry.computeVertexNormals();
     const deck = new THREE.Mesh(
-      new THREE.PlaneGeometry(20, 220),
+      deckGeometry,
       new THREE.MeshStandardMaterial({
         map: textureFactory.getRoadTexture(),
         roughness: 0.65,
@@ -1284,36 +1423,53 @@ export class CityGenerator {
         polygonOffsetUnits: -1
       })
     );
-    deck.rotation.x = -Math.PI / 2;
-    deck.position.set(160, 0.06, 450);
+    deck.position.set(centerX, 0, 450);
     deck.receiveShadow = true;
     bridge.add(deck);
 
     const railMaterial = new THREE.MeshStandardMaterial({ color: 0x647078, metalness: 0.65, roughness: 0.4 });
-    for (const x of [149.6, 170.4]) {
-      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.45, 1.15, 220), railMaterial);
-      rail.position.set(x, 0.65, 450);
-      bridge.add(rail);
-
+    const railGeometry = new THREE.BoxGeometry(0.45, 1.15, 10.1);
+    const rails = new THREE.InstancedMesh(railGeometry, railMaterial, 42);
+    const postGeometry = new THREE.BoxGeometry(0.55, 1.4, 0.55);
+    const posts = new THREE.InstancedMesh(postGeometry, railMaterial, 22);
+    const instanceTransform = new THREE.Object3D();
+    let railIndex = 0;
+    let postIndex = 0;
+    for (const x of [centerX - 10.4, centerX + 10.4]) {
+      for (let z = 345; z < 555; z += 10) {
+        const segmentZ = z + 5;
+        instanceTransform.position.set(x, getHarborBridgeHeight(segmentZ) + 0.65, segmentZ);
+        instanceTransform.updateMatrix();
+        rails.setMatrixAt(railIndex++, instanceTransform.matrix);
+      }
       for (let z = 350; z <= 550; z += 20) {
-        const post = new THREE.Mesh(new THREE.BoxGeometry(0.55, 1.4, 0.55), railMaterial);
-        post.position.set(x, 0.7, z);
-        bridge.add(post);
+        instanceTransform.position.set(x, getHarborBridgeHeight(z) + 0.7, z);
+        instanceTransform.updateMatrix();
+        posts.setMatrixAt(postIndex++, instanceTransform.matrix);
       }
     }
+    bridge.add(rails, posts);
 
     const centerLineMaterial = new THREE.MeshStandardMaterial({ color: 0xf2d27b, roughness: 0.72 });
+    const dashes = new THREE.InstancedMesh(
+      new THREE.BoxGeometry(0.18, 0.025, 4.4),
+      centerLineMaterial,
+      16
+    );
+    let dashIndex = 0;
     for (let z = 360; z <= 540; z += 12) {
-      const dash = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.025, 4.4), centerLineMaterial);
-      dash.position.set(160, 0.09, z);
-      bridge.add(dash);
+      instanceTransform.position.set(centerX, getHarborBridgeHeight(z) + 0.09, z);
+      instanceTransform.updateMatrix();
+      dashes.setMatrixAt(dashIndex++, instanceTransform.matrix);
     }
+    bridge.add(dashes);
 
     const pierMaterial = new THREE.MeshStandardMaterial({ color: 0x777e7e, roughness: 0.86 });
     for (const z of [390, 450, 510]) {
-      for (const x of [155, 165]) {
-        const pier = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.4, 3), pierMaterial);
-        pier.position.set(x, -0.64, z);
+      const pierHeight = getHarborBridgeHeight(z);
+      for (const x of [centerX - 5, centerX + 5]) {
+        const pier = new THREE.Mesh(new THREE.BoxGeometry(2.4, pierHeight, 3), pierMaterial);
+        pier.position.set(x, pierHeight / 2, z);
         bridge.add(pier);
       }
     }
